@@ -48,6 +48,9 @@ async function dbConnect() {
             }
             const memoryUri = global.mongoMemoryServer.getUri()
             console.log('✅ Connected to In-Memory MongoDB:', memoryUri)
+            if (mongoose.connection.readyState !== 0) {
+              await mongoose.disconnect()
+            }
             const conn = await mongoose.connect(memoryUri, { bufferCommands: false })
             return conn
           } catch (memErr: any) {
