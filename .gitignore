@@ -91,3 +91,7 @@ jspm_packages/
 
 # TernJS port file
 .tern-port
+
+# Build cache
+*.tsbuildinfo
+
