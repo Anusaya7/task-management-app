@@ -627,11 +627,6 @@ const EmployeeDashboard: React.FC = () => {
         hasValidationFailure = true;
       }
 
-      if (item.flagged && (!item.flagComment || !item.flagComment.trim())) {
-        itemErr.flagComment = 'Please add a comment for the flagged task.';
-        hasValidationFailure = true;
-      }
-
       if (Object.keys(itemErr).length > 0) {
         newErrors[item.boardId] = itemErr;
       }
@@ -1459,9 +1454,9 @@ const EmployeeDashboard: React.FC = () => {
                               )}
                             </td>
 
-                            {/* Flag & Comment */}
+                            {/* Flag */}
                             <td className="py-3.5 px-4 align-top">
-                              <div className="space-y-1.5">
+                              <div className="flex items-center pt-2">
                                 <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-bold text-slate-700">
                                   <input
                                     type="checkbox"
@@ -1471,22 +1466,6 @@ const EmployeeDashboard: React.FC = () => {
                                   />
                                   <span>Flag</span>
                                 </label>
-                                {item.flagged && (
-                                  <div>
-                                    <input
-                                      type="text"
-                                      value={item.flagComment}
-                                      onChange={(e) => updateBoardItem(item.boardId, { flagComment: e.target.value })}
-                                      placeholder="Flag reason/comment..."
-                                      className={`w-full px-2.5 py-1.5 text-[11px] rounded-lg border transition focus:outline-none ${
-                                        errs?.flagComment ? 'bg-rose-50 border-rose-400' : 'bg-amber-50/60 border-amber-300 text-amber-950'
-                                      }`}
-                                    />
-                                    {errs?.flagComment && (
-                                      <p className="text-[10px] font-bold text-rose-600 mt-0.5">{errs.flagComment}</p>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             </td>
 

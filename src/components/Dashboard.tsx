@@ -256,8 +256,9 @@ const Dashboard: React.FC = () => {
 
   // Handle Management Creating a Flag on a Task
   const handleCreateManagementFlag = async () => {
-    if (!managementFlagTask || !managementFlagMessage.trim()) return;
+    if (!managementFlagTask) return;
     const tId = managementFlagTask.id || managementFlagTask._id || '';
+    const messageText = managementFlagMessage.trim() || managementFlagType || 'Flagged by management';
 
     try {
       const res = await fetch('/api/flags', {
@@ -266,7 +267,7 @@ const Dashboard: React.FC = () => {
         body: JSON.stringify({
           taskId: tId,
           flagType: managementFlagType,
-          flagMessage: managementFlagMessage.trim()
+          flagMessage: messageText
         })
       });
 
