@@ -71,6 +71,8 @@ export async function POST(req: Request) {
     const flag = await Flag.create({
       taskId: task._id.toString(),
       taskTitle: task.title,
+      projectId: task.projectId,
+      projectName: task.projectName || 'Project',
       employeeId: task.assignedEmployeeIds[0] || user._id.toString(),
       employeeName: task.assignedEmployeeNames ? task.assignedEmployeeNames[0] : creatorName,
       createdBy: user._id.toString(),

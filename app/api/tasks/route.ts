@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     const status = searchParams.get('status')
     const projectId = searchParams.get('projectId')
     const employeeId = searchParams.get('employeeId')
+    const employeeOpeningView = searchParams.get('view') === 'employee-opening'
 
     let query: any = {}
 
@@ -40,6 +41,17 @@ export async function GET(req: Request) {
     } else {
       // Employee role: strictly own tasks
       query.assignedEmployeeIds = user._id.toString()
+      if (employeeOpeningView) {
+        const directorIds = (await Employee.find({ role: 'Director' }).select('_id').lean())
+          .map(employee => employee._id.toString())
+        query.$or = [
+          { assignedById: user._id.toString(), priority: 'Self' },
+          {
+            assignedById: { $in: directorIds },
+            priority: { $in: ['Urgent', 'Medium', 'Low', 'Daily'] }
+          }
+        ]
+      }
     }
 
     if (priority) query.priority = priority

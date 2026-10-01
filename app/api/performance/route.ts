@@ -64,6 +64,12 @@ export async function GET(req: Request) {
     const lastDayOfMonth = new Date(Date.UTC(yr, mo, 0)).getUTCDate()
     const monthEndStr = `${yr}-${String(mo).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`
 
+    const reqStartDate = searchParams.get('startDate')
+    const reqEndDate = searchParams.get('endDate')
+
+    const customStartStr = reqStartDate || monthStartStr
+    const customEndStr = reqEndDate || today
+
     const performanceReport = []
 
     for (const emp of employees) {
@@ -103,7 +109,7 @@ export async function GET(req: Request) {
         markingScore = Math.round((sum / ratings.length) * 10) / 10
       }
 
-      // Calculate Weekly and Monthly metrics from Daily Entries
+      // Calculate Weekly, Monthly, and Custom Range metrics from Daily Entries
       const dailyEntries = await DailyEntry.find({ employeeId: empIdStr }).lean()
 
       // Helper function for metric calculation
@@ -156,6 +162,7 @@ export async function GET(req: Request) {
 
       const weeklyMetrics = calcMetrics(weekStartStr, weekEndStr)
       const monthlyMetrics = calcMetrics(monthStartStr, monthEndStr)
+      const customMetrics = calcMetrics(customStartStr, customEndStr)
 
       performanceReport.push({
         employeeId: empIdStr,
@@ -183,6 +190,14 @@ export async function GET(req: Request) {
           workDone: monthlyMetrics.workDone,
           workHours: monthlyMetrics.workHours,
           freeHours: monthlyMetrics.freeHours,
+          marking: markingScore
+        },
+        custom: {
+          startDate: customStartStr,
+          endDate: customEndStr,
+          workDone: customMetrics.workDone,
+          workHours: customMetrics.workHours,
+          freeHours: customMetrics.freeHours,
           marking: markingScore
         }
       })

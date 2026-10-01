@@ -72,10 +72,30 @@ export async function POST(req: Request) {
     }
 
     const todayDate = getTodayKolkata()
+    if (user.role === 'Employee' && entries.some(item =>
+      typeof item.taskId !== 'string' ||
+      (!/^[a-f\d]{24}$/i.test(item.taskId) && item.taskId !== 'OFFICE_WORK')
+    )) {
+      return NextResponse.json({ error: 'Select a task assigned to you or add Office Works from the Daily Entry board.' }, { status: 400 })
+    }
+
+    const submittedTaskIds = entries
+      .map(item => item.taskId)
+      .filter((taskId): taskId is string => typeof taskId === 'string' && /^[a-f\d]{24}$/i.test(taskId))
+    const uniqueSubmittedTaskIds = Array.from(new Set(submittedTaskIds))
+
+    if (user.role === 'Employee' && uniqueSubmittedTaskIds.length !== submittedTaskIds.length) {
+      return NextResponse.json({ error: 'A task can only be added to Daily Entry once per day.' }, { status: 409 })
+    }
 
     // Enforce Project Security Rule for Employees
     if (user.role === 'Employee') {
-      const userTasks = await Task.find({ assignedEmployeeIds: user._id.toString() }).select('projectId')
+      const userTasks = await Task.find({ assignedEmployeeIds: user._id.toString() }).select('_id projectId')
+      const assignedTaskIds = new Set(userTasks.map(task => task._id.toString()))
+      if (uniqueSubmittedTaskIds.some(taskId => !assignedTaskIds.has(taskId))) {
+        return NextResponse.json({ error: 'You can only add tasks assigned to you to Daily Entry.' }, { status: 403 })
+      }
+
       const taskProjectIds = userTasks.map(t => t.projectId)
       const directProjectIds = user.assignedProjects || []
       const allowedProjectIds = new Set<string>([
@@ -113,9 +133,9 @@ export async function POST(req: Request) {
       if (!actionTakenStr) {
         return NextResponse.json({ error: 'Action Taken is required for all tasks' }, { status: 400 })
       }
-      const hrs = Number(item.hours) || 1
-      if (isNaN(hrs) || hrs <= 0) {
-        return NextResponse.json({ error: 'Please enter valid Hours spent (> 0)' }, { status: 400 })
+      const hrs = Number(item.hours)
+      if (!Number.isFinite(hrs) || hrs < 0.1 || hrs > 8) {
+        return NextResponse.json({ error: 'Please enter valid Hours spent (0.1 to 8)' }, { status: 400 })
       }
       if (item.flagged && (!item.flagComment || !item.flagComment.trim())) {
         return NextResponse.json({ error: 'Please add a comment for the flagged task' }, { status: 400 })
@@ -129,10 +149,34 @@ export async function POST(req: Request) {
       date: todayDate
     }).lean()
 
-    const existingTotalHours = existingTodayEntries.reduce((sum, e) => sum + (e.hours || 0), 0)
-    const grandTotal = existingTotalHours + totalSubmittedHours
+    if (user.role === 'Employee') {
+      const existingTaskIds = new Set(existingTodayEntries.map(entry => entry.taskId))
+      if (uniqueSubmittedTaskIds.some(taskId => existingTaskIds.has(taskId))) {
+        return NextResponse.json({ error: 'This task is already in your Daily Entry for today.' }, { status: 409 })
+      }
 
-    if (grandTotal > 8.01) {
+      const officeWorkEntries = entries.filter(item => item.taskId === 'OFFICE_WORK')
+      const getOfficeWorkKey = (item: { projectId?: string; taskTitle?: string; title?: string }) =>
+        `${item.projectId || 'OFFICE_PROJECT'}|${(item.taskTitle || item.title || '').trim().toLowerCase()}`
+      const submittedOfficeWorkKeys = officeWorkEntries.map(getOfficeWorkKey)
+      if (new Set(submittedOfficeWorkKeys).size !== submittedOfficeWorkKeys.length) {
+        return NextResponse.json({ error: 'A task can only be added to Daily Entry once per day.' }, { status: 409 })
+      }
+
+      const existingOfficeWorkKeys = new Set(
+        existingTodayEntries
+          .filter(entry => entry.taskId === 'OFFICE_WORK')
+          .map(getOfficeWorkKey)
+      )
+      if (submittedOfficeWorkKeys.some(key => existingOfficeWorkKeys.has(key))) {
+        return NextResponse.json({ error: 'This task is already in your Daily Entry for today.' }, { status: 409 })
+      }
+    }
+
+    const existingTotalHours = existingTodayEntries.reduce((sum, e) => sum + (e.hours || 0), 0)
+    const grandTotal = Number((existingTotalHours + totalSubmittedHours).toFixed(2))
+
+    if (grandTotal > 8) {
       return NextResponse.json({
         error: `Total hours cannot exceed 8 hours. Currently allocated: ${existingTotalHours} hrs, attempting to add: ${totalSubmittedHours} hrs.`
       }, { status: 400 })
@@ -154,7 +198,7 @@ export async function POST(req: Request) {
         details: detailsStr,
         actionTaken: actionTakenStr,
         date: todayDate,
-        hours: Number(item.hours) || 1,
+        hours: Number(item.hours),
         flagged: Boolean(item.flagged),
         flagComment: item.flagged ? (item.flagComment ? item.flagComment.trim() : '') : '',
         status: item.status || 'Completed'

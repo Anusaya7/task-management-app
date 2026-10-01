@@ -33,6 +33,22 @@ export default function Home() {
   }
 
   if (!user) {
+    if (initError) {
+      return (
+        <>
+          <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-lg">
+            <span>Unable to verify your existing session. You can retry or sign in below.</span>
+            <button
+              onClick={() => void retryAuth()}
+              className="rounded-lg bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800"
+            >
+              Retry Session
+            </button>
+          </div>
+          <Login />
+        </>
+      )
+    }
     return <Login />
   }
 

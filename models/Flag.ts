@@ -11,6 +11,8 @@ export interface IFlagReply {
 export interface IFlag extends Document {
   taskId: string
   taskTitle?: string
+  projectId?: string
+  projectName?: string
   employeeId: string
   employeeName?: string
   createdBy?: string
@@ -37,6 +39,8 @@ const flagReplySchema = new Schema<IFlagReply>({
 const flagSchema = new Schema<IFlag>({
   taskId: { type: String, required: true, index: true },
   taskTitle: { type: String },
+  projectId: { type: String },
+  projectName: { type: String },
   employeeId: { type: String, required: true, index: true },
   employeeName: { type: String },
   createdBy: { type: String },

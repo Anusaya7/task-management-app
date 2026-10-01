@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Project, Task, Reminder, Flag, TaskPriority, EmployeePerformance, DailyEntry } from '../types';
 import Sidebar, { TabType } from './Sidebar';
+import { formatHoursMinutes } from './BadgeUtils';
 import TaskModal from './TaskModal';
 import NotificationCenter from './NotificationCenter';
 import EmployeeProfile from './EmployeeProfile';
@@ -39,7 +40,7 @@ import {
 
 const MAX_DAILY_HOURS = 8;
 
-type CategoryType = 'URGENT' | 'LESS_URGENT' | 'UPCOMING' | 'SELF_DEFINED' | 'DAILY_TASK';
+type CategoryType = 'URGENT' | 'LESS_URGENT' | 'LOW_URGENT' | 'SELF_DEFINED' | 'DAILY_TASK';
 
 interface CategoryConfig {
   id: CategoryType;
@@ -54,7 +55,7 @@ interface CategoryConfig {
 const CATEGORIES: CategoryConfig[] = [
   {
     id: 'URGENT',
-    label: 'URGENT',
+    label: 'Urgent',
     dbPriority: 'Urgent',
     bgColor: '#DC2626',
     hoverColor: '#B91C1C',
@@ -63,7 +64,7 @@ const CATEGORIES: CategoryConfig[] = [
   },
   {
     id: 'LESS_URGENT',
-    label: 'LESS URGENT',
+    label: 'Less Urgent',
     dbPriority: 'Medium',
     bgColor: '#F59E0B',
     hoverColor: '#D97706',
@@ -71,8 +72,8 @@ const CATEGORIES: CategoryConfig[] = [
     textColor: '#FFFFFF'
   },
   {
-    id: 'UPCOMING',
-    label: 'UPCOMING',
+    id: 'LOW_URGENT',
+    label: 'Low Urgent',
     dbPriority: 'Low',
     bgColor: '#7C3AED',
     hoverColor: '#6D28D9',
@@ -81,7 +82,7 @@ const CATEGORIES: CategoryConfig[] = [
   },
   {
     id: 'SELF_DEFINED',
-    label: 'SELF DEFINED',
+    label: 'Self Defined',
     dbPriority: 'Self',
     bgColor: '#6366F1',
     hoverColor: '#4F46E5',
@@ -90,7 +91,7 @@ const CATEGORIES: CategoryConfig[] = [
   },
   {
     id: 'DAILY_TASK',
-    label: 'DAILY TASK',
+    label: 'Daily Task',
     dbPriority: 'Daily',
     bgColor: '#16A34A',
     hoverColor: '#15803D',
@@ -108,141 +109,6 @@ interface DisplayTaskItem {
   category: CategoryType;
 }
 
-const PRESET_TASKS_CATALOG: DisplayTaskItem[] = [
-  {
-    id: 'ZP_SCHOOL_PROJ',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Working Drawings',
-    description: 'Plans, Elevations, Sections',
-    category: 'URGENT'
-  },
-  {
-    id: 'OW_LESS_1',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Drawing Cleaning & Updating',
-    description: 'Purging layers, fixing block references & sheet sets',
-    category: 'LESS_URGENT'
-  },
-  {
-    id: 'ZP_LESS_2',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Material Specifications',
-    description: 'Preparing finish schedule & brand approvals',
-    category: 'LESS_URGENT'
-  },
-  {
-    id: 'OW_UPCOMING_1',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Folder & File Cleaning',
-    description: 'Organizing CAD files, archives, shared drives',
-    category: 'UPCOMING'
-  },
-  {
-    id: 'OW_UPCOMING_2',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Profile & Portfolio Update',
-    description: 'Updating project renders & case studies',
-    category: 'UPCOMING'
-  },
-  {
-    id: 'OW_SELF_1',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Social Networking Posts',
-    description: 'Creating design showcases & firm updates',
-    category: 'SELF_DEFINED'
-  },
-  {
-    id: 'OW_SELF_2',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Internal Discussions',
-    description: 'Brainstorming & peer design reviews',
-    category: 'SELF_DEFINED'
-  },
-
-  // PPT Predefined Daily Tasks (Group 1: ZP-School / Assigned Project)
-  {
-    id: 'ZP_DAILY_1',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Coordination, project review, & Follow-up Calls',
-    description: 'Client calls, vendor coordination, team sync',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'ZP_DAILY_2',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Folder & File Cleaning',
-    description: 'Organizing CAD files, archives, shared drives',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'ZP_DAILY_3',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Drawing Cleaning & Updating',
-    description: 'Purging layers, fixing block references & sheet sets',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'ZP_DAILY_7',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Client Meetings',
-    description: 'Attending client review & milestone meetings',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'ZP_DAILY_8',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Meeting Preparation',
-    description: 'Drafting presentation decks, printouts, agendas',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'ZP_DAILY_9',
-    projectId: 'ZP_SCHOOL_PROJ',
-    projectName: 'ZP-School',
-    title: 'Site Visit Preparation',
-    description: 'Checklists, measuring tools, safety compliance',
-    category: 'DAILY_TASK'
-  },
-
-  // PPT Predefined Daily Tasks (Group 2: Office Works)
-  {
-    id: 'OW_DAILY_4',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Profile & Portfolio Update',
-    description: 'Updating project renders & case studies',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'OW_DAILY_5',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Social Networking Posts',
-    description: 'Creating design showcases & firm updates',
-    category: 'DAILY_TASK'
-  },
-  {
-    id: 'OW_DAILY_6',
-    projectId: 'OFFICE_WORKS',
-    projectName: 'Office Works',
-    title: 'Internal Discussions',
-    description: 'Brainstorming & peer design reviews',
-    category: 'DAILY_TASK'
-  }
-];
-
 interface BoardTask {
   boardId: string;
   taskId: string;
@@ -257,28 +123,17 @@ interface BoardTask {
   flagComment: string;
   workDone: number; // 10-100%
   status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked';
-  urgency: 'URGENT' | 'LESS URGENT' | 'UPCOMING' | 'SELF DEFINED / DAILY TASK';
+  urgency: 'URGENT' | 'LESS URGENT' | 'LOW URGENT' | 'SELF DEFINED' | 'DAILY TASK';
 }
 
-const OFFICE_WORKS_PRESETS = [
-  { id: 'OW_1', title: 'Coordination, project review, & Follow-up Calls', details: 'Client calls, vendor coordination, team sync' },
-  { id: 'OW_2', title: 'Folder & File Cleaning', details: 'Organizing CAD files, archives, shared drives' },
-  { id: 'OW_3', title: 'Drawing Cleaning & Updating', details: 'Purging layers, fixing block references & sheet sets' },
-  { id: 'OW_4', title: 'Client Meetings', details: 'Attending client review & milestone meetings' },
-  { id: 'OW_5', title: 'Meeting Preparation', details: 'Drafting presentation decks, printouts, agendas' },
-  { id: 'OW_6', title: 'Site Visit Preparation', details: 'Checklists, measuring tools, safety compliance' },
-  { id: 'OW_7', title: 'Profile & Portfolio Update', details: 'Updating project renders & case studies' },
-  { id: 'OW_8', title: 'Social Networking Posts', details: 'Creating design showcases & firm updates' },
-  { id: 'OW_9', title: 'Internal Discussions', details: 'Brainstorming & peer design reviews' }
-];
-
-const SAMPLE_PROJECT = {
-  id: 'ZP_SCHOOL_PROJ',
-  projectName: 'ZP-School',
-  taskTitle: 'Working Drawings',
-  details: 'Plans, Elevations, Sections',
-  urgency: 'URGENT' as const
-};
+interface DailyWorkRow {
+  id: string;
+  projectName: string;
+  taskTitle: string;
+  description: string;
+  boardId: string;
+  entryId: string;
+}
 
 const EmployeeDashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -287,6 +142,7 @@ const EmployeeDashboard: React.FC = () => {
   const [fetchError, setFetchError] = useState<boolean>(false);
   
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [openingTasks, setOpeningTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
@@ -314,7 +170,6 @@ const EmployeeDashboard: React.FC = () => {
   const [dailyWorkActionTaken, setDailyWorkActionTaken] = useState<string>('');
   const [dailyWorkHours, setDailyWorkHours] = useState<number>(1);
   const [dailyWorkError, setDailyWorkError] = useState<string>('');
-  const [isSavingDailyWork, setIsSavingDailyWork] = useState<boolean>(false);
 
   // Daily Entry Task Board State
   const [dailyBoard, setDailyBoard] = useState<BoardTask[]>([]);
@@ -345,9 +200,6 @@ const EmployeeDashboard: React.FC = () => {
   const [newReminderError, setNewReminderError] = useState<string>('');
   const [isSavingReminder, setIsSavingReminder] = useState<boolean>(false);
 
-  // Performance Tab View State ('weekly' | 'monthly')
-  const [perfTab, setPerfTab] = useState<'weekly' | 'monthly'>('weekly');
-
   // Today's date in Asia/Kolkata timezone YYYY-MM-DD
   const getKolkataDateString = () => {
     return new Intl.DateTimeFormat('en-CA', {
@@ -359,6 +211,25 @@ const EmployeeDashboard: React.FC = () => {
   };
 
   const todayDateStr = getKolkataDateString();
+
+  // Performance Tab View State ('weekly' | 'monthly' | 'custom')
+  const [perfTab, setPerfTab] = useState<'weekly' | 'monthly' | 'custom'>('custom');
+  const [perfStartDate, setPerfStartDate] = useState<string>('2026-09-01');
+  const [perfEndDate, setPerfEndDate] = useState<string>(todayDateStr);
+
+  const handleApplyPerfDateRange = async (start: string, end: string) => {
+    try {
+      const res = await fetch(`/api/performance?startDate=${start}&endDate=${end}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) {
+          setPerformance(data[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch performance for date range:', err);
+    }
+  };
 
   const todayFormattedText = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -373,8 +244,9 @@ const EmployeeDashboard: React.FC = () => {
       if (isInitial) {
         setLoading(true);
       }
-      const [tasksRes, projectsRes, remindersRes, flagsRes, perfRes, historyRes] = await Promise.all([
+      const [tasksRes, openingTasksRes, projectsRes, remindersRes, flagsRes, perfRes, historyRes] = await Promise.all([
         fetch('/api/tasks'),
+        fetch('/api/tasks?view=employee-opening'),
         fetch('/api/projects'),
         fetch('/api/reminders'),
         fetch('/api/flags'),
@@ -386,6 +258,13 @@ const EmployeeDashboard: React.FC = () => {
         const tasksData = await tasksRes.json();
         setTasks(tasksData);
       }
+
+      if (!tasksRes.ok || !openingTasksRes.ok) {
+        throw new Error(`Unable to load assigned tasks (HTTP ${tasksRes.status}/${openingTasksRes.status}).`);
+      }
+
+      setOpeningTasks(await openingTasksRes.json());
+      setFetchError(false);
 
       if (projectsRes.ok) {
         const projData = await projectsRes.json();
@@ -415,6 +294,7 @@ const EmployeeDashboard: React.FC = () => {
       }
     } catch (err) {
       console.error('Error fetching employee dashboard data:', err);
+      setFetchError(true);
     } finally {
       if (isInitial) {
         setLoading(false);
@@ -437,8 +317,9 @@ const EmployeeDashboard: React.FC = () => {
   const getUrgencyFromPriority = (priority: TaskPriority): BoardTask['urgency'] => {
     if (priority === 'Urgent') return 'URGENT';
     if (priority === 'Medium') return 'LESS URGENT';
-    if (priority === 'Low') return 'UPCOMING';
-    return 'SELF DEFINED / DAILY TASK';
+    if (priority === 'Low') return 'LOW URGENT';
+    if (priority === 'Daily') return 'DAILY TASK';
+    return 'SELF DEFINED';
   };
 
   // Add Task to Daily Board
@@ -451,7 +332,12 @@ const EmployeeDashboard: React.FC = () => {
     urgency?: BoardTask['urgency'];
   }) => {
     // Prevent duplicates
-    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.taskId && b.taskTitle === taskItem.taskTitle);
+    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.taskId && b.taskTitle === taskItem.taskTitle) ||
+      dailyHistory.some(entry =>
+        entry.date === todayDateStr &&
+        entry.taskId === taskItem.taskId &&
+        entry.taskTitle === taskItem.taskTitle
+      );
     if (alreadyExists) {
       showToast('error', `Task "${taskItem.taskTitle}" is already in your Daily Entry Task Board.`);
       return;
@@ -471,7 +357,7 @@ const EmployeeDashboard: React.FC = () => {
       flagComment: '',
       workDone: 50,
       status: 'In Progress',
-      urgency: taskItem.urgency || 'SELF DEFINED / DAILY TASK'
+      urgency: taskItem.urgency || 'SELF DEFINED'
     };
 
     setDailyBoard(prev => [...prev, newBoardItem]);
@@ -483,12 +369,13 @@ const EmployeeDashboard: React.FC = () => {
     const urgencyLabelMap: Record<CategoryType, BoardTask['urgency']> = {
       URGENT: 'URGENT',
       LESS_URGENT: 'LESS URGENT',
-      UPCOMING: 'UPCOMING',
-      SELF_DEFINED: 'SELF DEFINED / DAILY TASK',
-      DAILY_TASK: 'SELF DEFINED / DAILY TASK'
+      LOW_URGENT: 'LOW URGENT',
+      SELF_DEFINED: 'SELF DEFINED',
+      DAILY_TASK: 'DAILY TASK'
     };
 
-    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.id || b.taskTitle === taskItem.title);
+    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.id) ||
+      dailyHistory.some(entry => entry.taskId === taskItem.id && entry.date === todayDateStr);
     if (alreadyExists) {
       showToast('error', `Task is already added to Daily Entry.`);
       return;
@@ -615,7 +502,7 @@ const EmployeeDashboard: React.FC = () => {
   };
 
   // Save Self Created Daily Work Entry
-  const handleSaveDailyWork = async (e: React.FormEvent) => {
+  const handleSaveDailyWork = (e: React.FormEvent) => {
     e.preventDefault();
     setDailyWorkError('');
 
@@ -636,74 +523,58 @@ const EmployeeDashboard: React.FC = () => {
       return;
     }
 
-    try {
-      setIsSavingDailyWork(true);
-      const selectedProj = projects.find(p => (p.id || p._id) === dailyWorkProjectId);
-      const projName = selectedProj ? selectedProj.projectName : 'Project';
-
-      const payload = {
-        projectId: dailyWorkProjectId,
-        projectName: projName,
-        taskTitle: dailyWorkTask.trim(),
-        details: dailyWorkDescription.trim(),
-        actionTaken: dailyWorkActionTaken.trim(),
-        hours: Number(dailyWorkHours) || 1,
-        status: 'Completed'
-      };
-
-      const res = await fetch('/api/daily-entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setDailyWorkError(data.error || 'Failed to save daily work. Please try again.');
-        return;
-      }
-
-      // Add entry to dailyBoard
-      const newBoardItem: BoardTask = {
-        boardId: `board_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        taskId: data.entries?.[0]?._id || `self_${Date.now()}`,
-        projectId: dailyWorkProjectId,
-        projectName: projName,
-        taskTitle: dailyWorkTask.trim(),
-        details: dailyWorkDescription.trim(),
-        actionTaken: dailyWorkActionTaken.trim(),
-        date: todayDateStr,
-        hours: Number(dailyWorkHours) || 1,
-        flagged: false,
-        flagComment: '',
-        workDone: 100,
-        status: 'Completed',
-        urgency: 'SELF DEFINED / DAILY TASK'
-      };
-
-      setDailyBoard(prev => [newBoardItem, ...prev]);
-      showToast('success', 'Daily work added successfully.');
-
-      // Reset form & close modal
-      setDailyWorkProjectId('');
-      setDailyWorkTask('');
-      setDailyWorkDescription('');
-      setDailyWorkActionTaken('');
-      setDailyWorkHours(1);
-      setIsDailyWorkModalOpen(false);
-
-      // Refresh data
-      fetchData();
-    } catch (err) {
-      console.error('Save daily work error:', err);
-      setDailyWorkError('Unable to save daily work. Please try again.');
-    } finally {
-      setIsSavingDailyWork(false);
+    const hours = Number(dailyWorkHours);
+    if (!Number.isFinite(hours) || hours < 0.1 || hours > MAX_DAILY_HOURS) {
+      setDailyWorkError('Please enter valid Hours (0.1 to 8).');
+      return;
     }
+
+    const taskTitle = dailyWorkTask.trim();
+    const alreadyExists = dailyBoard.some(item =>
+      item.taskId === 'OFFICE_WORK' && item.taskTitle === taskTitle
+    ) || dailyHistory.some(entry =>
+      entry.date === todayDateStr &&
+      entry.taskId === 'OFFICE_WORK' &&
+      entry.taskTitle === taskTitle
+    );
+    if (alreadyExists) {
+      setDailyWorkError("This task is already in today's Daily Entry.");
+      return;
+    }
+
+    const selectedProj = projects.find(p => (p.id || p._id) === dailyWorkProjectId);
+    const projName = selectedProj ? selectedProj.projectName : 'Project';
+    const newBoardItem: BoardTask = {
+      boardId: `board_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      taskId: 'OFFICE_WORK',
+      projectId: dailyWorkProjectId,
+      projectName: projName,
+      taskTitle,
+      details: dailyWorkDescription.trim(),
+      actionTaken: dailyWorkActionTaken.trim(),
+      date: todayDateStr,
+      hours,
+      flagged: false,
+      flagComment: '',
+      workDone: 0,
+      status: 'In Progress',
+      urgency: 'SELF DEFINED'
+    };
+
+    setDailyBoard(prev => [newBoardItem, ...prev]);
+    showToast('success', 'Daily work added to your Daily Entry Task Board.');
+    setDailyWorkProjectId('');
+    setDailyWorkTask('');
+    setDailyWorkDescription('');
+    setDailyWorkActionTaken('');
+    setDailyWorkHours(1);
+    setIsDailyWorkModalOpen(false);
   };
 
   // Dynamic Hours Calculations
-  const allocatedHours = dailyBoard.reduce((sum, item) => sum + (Number(item.hours) || 0), 0);
+  const todayEntries = dailyHistory.filter(entry => entry.date === todayDateStr);
+  const savedTodayHours = todayEntries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+  const allocatedHours = savedTodayHours + dailyBoard.reduce((sum, item) => sum + (Number(item.hours) || 0), 0);
   const freeHours = Math.max(0, MAX_DAILY_HOURS - allocatedHours);
   const isHoursExceeded = allocatedHours > MAX_DAILY_HOURS;
   const progressPercent = Math.min(100, Math.round((allocatedHours / MAX_DAILY_HOURS) * 100));
@@ -751,8 +622,8 @@ const EmployeeDashboard: React.FC = () => {
       }
 
       const hrs = Number(item.hours);
-      if (isNaN(hrs) || hrs <= 0) {
-        itemErr.hours = 'Please enter valid Hours (> 0).';
+      if (!Number.isFinite(hrs) || hrs < 0.1 || hrs > MAX_DAILY_HOURS) {
+        itemErr.hours = 'Please enter valid Hours (0.1 to 8).';
         hasValidationFailure = true;
       }
 
@@ -809,7 +680,7 @@ const EmployeeDashboard: React.FC = () => {
       showToast('success', 'Daily entry submitted successfully.');
       setDailyBoard([]);
       setFieldErrors({});
-      fetchData();
+      await fetchData(false);
     } catch (err) {
       showToast('error', 'Network error. Failed to submit daily entry.');
     } finally {
@@ -980,18 +851,19 @@ const EmployeeDashboard: React.FC = () => {
     const norm = (p || '').toLowerCase();
     if (norm.includes('urgent') && !norm.includes('less') && !norm.includes('low') && !norm.includes('upcoming')) return 'URGENT';
     if (norm.includes('medium') || norm.includes('less')) return 'LESS_URGENT';
-    if (norm.includes('upcoming') || norm.includes('low') || norm.includes('pending')) return 'UPCOMING';
+    if (norm.includes('low')) return 'LOW_URGENT';
     if (norm.includes('self')) return 'SELF_DEFINED';
     return 'DAILY_TASK';
   };
 
   const currentCategoryConfig = CATEGORIES.find(c => c.id === activeCategory) || CATEGORIES[4];
 
-  const matchingDbTasks: DisplayTaskItem[] = tasks
+  const matchingDbTasks: DisplayTaskItem[] = openingTasks
     .filter(t => t.status !== 'Completed')
+    .filter(t => Boolean(t.id || t._id))
     .filter(t => mapPriorityToCategory(t.priority) === activeCategory)
     .map(t => ({
-      id: t.id || t._id || `db_task_${Math.random()}`,
+      id: t.id || t._id || '',
       projectId: t.projectId || 'GENERAL',
       projectName: t.projectName || 'Project',
       title: t.title,
@@ -999,14 +871,34 @@ const EmployeeDashboard: React.FC = () => {
       category: activeCategory
     }));
 
-  const matchingPresetTasks = PRESET_TASKS_CATALOG.filter(pt => pt.category === activeCategory);
-
-  const combinedCategoryTasks: DisplayTaskItem[] = [...matchingDbTasks];
-  for (const preset of matchingPresetTasks) {
-    if (!combinedCategoryTasks.some(t => t.title.toLowerCase() === preset.title.toLowerCase())) {
-      combinedCategoryTasks.push(preset);
-    }
-  }
+  const combinedCategoryTasks = matchingDbTasks;
+  const availableAssignedTasks = openingTasks
+    .filter(task => task.status !== 'Completed')
+    .filter(task => urgencyFilter === 'ALL' || getUrgencyFromPriority(task.priority) === urgencyFilter);
+  const dailyWorkRows: DailyWorkRow[] = [
+    ...todayEntries
+      .map((entry, index) => ({
+        id: entry.id || entry._id || `daily-entry-${index}`,
+        projectName: entry.projectName || 'Project',
+        taskTitle: entry.taskTitle,
+        description: entry.details || '',
+        boardId: '',
+        entryId: entry.id || entry._id || ''
+      })),
+    ...dailyBoard
+      .filter(item => !dailyHistory.some(entry =>
+        entry.date === todayDateStr &&
+        (entry.taskId === item.taskId || entry.id === item.taskId || entry._id === item.taskId)
+      ))
+      .map(item => ({
+        id: item.boardId,
+        projectName: item.projectName,
+        taskTitle: item.taskTitle,
+        description: item.details,
+        boardId: item.boardId,
+        entryId: ''
+      }))
+  ];
 
   return (
     <div className="flex bg-[#F8FAFC] min-h-screen font-sans text-slate-900">
@@ -1118,7 +1010,7 @@ const EmployeeDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* UPDATE 1 — 5 TASK CATEGORY BUTTONS (URGENT, LESS URGENT, UPCOMING, SELF DEFINED, DAILY TASK) */}
+            {/* Task categories */}
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
                 {CATEGORIES.map((cat) => {
@@ -1141,7 +1033,7 @@ const EmployeeDashboard: React.FC = () => {
                       <span className="flex items-center justify-center">
                         {cat.id === 'URGENT' && <AlertTriangle size={18} className="text-white" />}
                         {cat.id === 'LESS_URGENT' && <Clock size={18} className="text-white" />}
-                        {cat.id === 'UPCOMING' && <Sparkles size={18} className="text-white" />}
+                        {cat.id === 'LOW_URGENT' && <Sparkles size={18} className="text-white" />}
                         {cat.id === 'SELF_DEFINED' && <Edit3 size={18} className="text-white" />}
                         {cat.id === 'DAILY_TASK' && <CalendarCheck size={18} className="text-white" />}
                       </span>
@@ -1166,7 +1058,7 @@ const EmployeeDashboard: React.FC = () => {
                       Task List &bull; {
                         activeCategory === 'URGENT' ? 'Urgent Tasks' :
                         activeCategory === 'LESS_URGENT' ? 'Less Urgent Tasks' :
-                        activeCategory === 'UPCOMING' ? 'Upcoming Tasks' :
+                        activeCategory === 'LOW_URGENT' ? 'Low Urgent Tasks' :
                         activeCategory === 'SELF_DEFINED' ? 'Self Defined Tasks' :
                         'Daily Tasks'
                       }
@@ -1174,7 +1066,7 @@ const EmployeeDashboard: React.FC = () => {
                     <p className="text-xs font-semibold text-[#64748B] mt-0.5">
                       {
                         activeCategory === 'DAILY_TASK'
-                          ? 'Manage predefined daily activities and add required tasks to your Daily Entry Chart.'
+                          ? 'Daily tasks assigned to you by the Director.'
                           : `Showing: ${currentCategoryConfig.label} Tasks`
                       }
                     </p>
@@ -1194,27 +1086,11 @@ const EmployeeDashboard: React.FC = () => {
                       </button>
                     )}
 
-                    {activeCategory === 'DAILY_TASK' && (
-                      <button
-                        onClick={() => {
-                          setDailyWorkError('');
-                          if (projects.length > 0) {
-                            setDailyWorkProjectId(projects[0].id || projects[0]._id || '');
-                          }
-                          setIsDailyWorkModalOpen(true);
-                        }}
-                        className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Plus size={15} />
-                        <span>+ Add Daily Work</span>
-                      </button>
-                    )}
-
                     <span className="px-3.5 py-1 text-xs font-bold rounded-full bg-blue-50 text-[#2563EB] border border-blue-200">
                       {
                         activeCategory === 'URGENT' ? 'Urgent Tasks' :
                         activeCategory === 'LESS_URGENT' ? 'Less Urgent Tasks' :
-                        activeCategory === 'UPCOMING' ? 'Upcoming Tasks' :
+                        activeCategory === 'LOW_URGENT' ? 'Low Urgent Tasks' :
                         activeCategory === 'SELF_DEFINED' ? 'Self Defined Tasks' :
                         'Daily Tasks'
                       } ({combinedCategoryTasks.length})
@@ -1252,16 +1128,13 @@ const EmployeeDashboard: React.FC = () => {
                   /* EMPTY STATE */
                   <div className="py-12 text-center space-y-3">
                     <ListTodo className="w-12 h-12 text-slate-300 mx-auto" />
-                    <h3 className="text-base font-bold text-[#0F172A]">
-                      {activeCategory === 'DAILY_TASK' ? 'No Daily Tasks Available' : 'No tasks available'}
-                    </h3>
                     <p className="text-xs text-[#64748B]">
                       {
-                        activeCategory === 'URGENT' ? 'No urgent tasks have been assigned to you.' :
-                        activeCategory === 'LESS_URGENT' ? 'No less urgent tasks have been assigned to you.' :
-                        activeCategory === 'UPCOMING' ? 'No upcoming tasks scheduled.' :
-                        activeCategory === 'SELF_DEFINED' ? 'No self-defined tasks yet.' :
-                        'No daily tasks are currently available.'
+                        activeCategory === 'URGENT' ? 'No urgent tasks assigned.' :
+                        activeCategory === 'LESS_URGENT' ? 'No less urgent tasks assigned.' :
+                        activeCategory === 'LOW_URGENT' ? 'No low urgent tasks assigned.' :
+                        activeCategory === 'SELF_DEFINED' ? 'No self-defined tasks added yet.' :
+                        'No daily tasks assigned.'
                       }
                     </p>
                     {activeCategory === 'SELF_DEFINED' && (
@@ -1291,9 +1164,8 @@ const EmployeeDashboard: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-[#E2E8F0] text-sm text-[#0F172A]">
                         {combinedCategoryTasks.map((t) => {
-                          const isAdded = dailyBoard.some(
-                            b => b.taskId === t.id || b.taskTitle === t.title
-                          );
+                          const isAdded = dailyBoard.some(b => b.taskId === t.id) ||
+                            dailyHistory.some(entry => entry.taskId === t.id && entry.date === todayDateStr);
 
                           return (
                             <tr key={t.id} className="hover:bg-[#F8FAFC] transition-colors">
@@ -1331,7 +1203,7 @@ const EmployeeDashboard: React.FC = () => {
                                   ) : (
                                     <>
                                       <Plus size={14} />
-                                      <span>+ Add to Daily Entry Chart</span>
+                                      <span>Add to Daily Entry</span>
                                     </>
                                   )}
                                 </button>
@@ -1345,178 +1217,70 @@ const EmployeeDashboard: React.FC = () => {
                 )}
               </div>
 
-              {/* YOUR SUBMITTED DAILY WORK ENTRIES SECTION */}
-              {activeCategory === 'DAILY_TASK' && (
-                <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E2E8F0]">
-                    <div>
-                      <h3 className="text-base font-bold text-[#0F172A]">Your Submitted Daily Work Entries</h3>
-                      <p className="text-xs text-[#64748B]">Records of work entries created by you</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setDailyWorkError('');
-                        if (projects.length > 0) {
-                          setDailyWorkProjectId(projects[0].id || projects[0]._id || '');
-                        }
-                        setIsDailyWorkModalOpen(true);
-                      }}
-                      className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
-                    >
-                      <Plus size={15} />
-                      <span>+ Add Daily Work</span>
-                    </button>
+              <section className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E2E8F0]">
+                  <div>
+                    <h3 className="text-base font-bold text-[#0F172A]">Daily Work</h3>
+                    <p className="text-xs text-[#64748B]">Tasks you have added to your existing Daily Entry board.</p>
                   </div>
-
-                  {dailyHistory.length === 0 ? (
-                    <div className="py-8 text-center space-y-2 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                      <FileText className="w-8 h-8 text-slate-300 mx-auto" />
-                      <p className="text-xs font-bold text-[#0F172A]">No daily work entries yet.</p>
-                      <p className="text-xs text-[#64748B]">Click &quot;+ Add Daily Work&quot; to add your completed work entry.</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse min-w-[750px]">
-                        <thead>
-                          <tr className="bg-[#F8FAFC] text-[#0F172A] text-xs font-extrabold uppercase tracking-wider border-b border-[#E2E8F0]">
-                            <th className="py-3.5 px-4 w-[18%]">Project</th>
-                            <th className="py-3.5 px-4 w-[22%]">Task</th>
-                            <th className="py-3.5 px-4 w-[25%]">Description</th>
-                            <th className="py-3.5 px-4 w-[20%]">Action Taken</th>
-                            <th className="py-3.5 px-4 w-[10%] text-center">Date</th>
-                            <th className="py-3.5 px-4 w-[5%] text-center">Status</th>
-                            <th className="py-3.5 px-4 text-center">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#E2E8F0] text-xs text-[#0F172A]">
-                          {dailyHistory.map(entry => {
-                            const entryId = entry.id || entry._id || '';
-                            return (
-                              <tr key={entryId} className="hover:bg-[#F8FAFC] transition-colors">
-                                <td className="py-3.5 px-4 font-bold align-top text-[#0F172A]">{entry.projectName}</td>
-                                <td className="py-3.5 px-4 font-semibold align-top text-[#0F172A]">{entry.taskTitle}</td>
-                                <td className="py-3.5 px-4 align-top text-[#64748B]">{entry.details || '-'}</td>
-                                <td className="py-3.5 px-4 align-top text-[#0F172A]">{entry.actionTaken}</td>
-                                <td className="py-3.5 px-4 align-top text-center font-bold whitespace-nowrap text-[#0F172A]">{entry.date}</td>
-                                <td className="py-3.5 px-4 align-top text-center">
-                                  <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                    {entry.status || 'Submitted'}
-                                  </span>
-                                </td>
-                                <td className="py-3.5 px-4 align-top text-center">
-                                  <button
-                                    onClick={() => handleDeleteDailyEntry(entryId)}
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                                    title="Delete daily entry"
-                                  >
-                                    <Trash2 size={15} />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  <button
+                    onClick={() => setActiveTab('today-work')}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <CalendarCheck size={15} />
+                    <span>ADD DAILY WORK{dailyBoard.length > 0 ? ` (${dailyBoard.length})` : ''}</span>
+                  </button>
                 </div>
-              )}
-            </div>
 
-            {/* Quick Actions & Office Works Presets Section */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <div>
-                  <h3 className="text-base font-bold text-[#172554]">Office Works Quick Presets</h3>
-                  <p className="text-xs text-slate-500">Standard office administration tasks &bull; Click to add to Daily Task Board</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {OFFICE_WORKS_PRESETS.map((ow) => {
-                  const isAdded = dailyBoard.some(b => b.taskTitle === ow.title);
-                  return (
-                    <div 
-                      key={ow.id}
-                      className="p-3.5 border border-slate-200 rounded-xl bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-300 transition flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-900 truncate">{ow.title}</p>
-                        <p className="text-[11px] text-slate-500 truncate">{ow.details}</p>
-                      </div>
-
-                      <button
-                        disabled={isAdded}
-                        onClick={() => handleAddToDailyBoard({
-                          taskId: ow.id,
-                          projectId: 'OFFICE_WORKS',
-                          projectName: 'Office Works',
-                          taskTitle: ow.title,
-                          details: ow.details,
-                          urgency: 'SELF DEFINED / DAILY TASK'
-                        })}
-                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 flex-shrink-0 cursor-pointer ${
-                          isAdded 
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-not-allowed' 
-                            : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
-                        }`}
-                      >
-                        {isAdded ? (
-                          <>
-                            <Check size={13} />
-                            <span>Added</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus size={13} />
-                            <span>Add</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Sample Project ZP-School Card */}
-            <div className="bg-gradient-to-r from-indigo-900 to-slate-900 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <span className="px-3 py-1 bg-amber-400 text-slate-950 font-black text-[10px] tracking-wider uppercase rounded-full">
-                  Sample Requirement Project
-                </span>
-                <h3 className="text-lg font-bold mt-2">Project: {SAMPLE_PROJECT.projectName}</h3>
-                <p className="text-xs text-indigo-200 mt-0.5">Task: <span className="font-bold text-white">{SAMPLE_PROJECT.taskTitle}</span> &bull; {SAMPLE_PROJECT.details}</p>
-              </div>
-
-              <button
-                disabled={dailyBoard.some(b => b.taskTitle === SAMPLE_PROJECT.taskTitle)}
-                onClick={() => handleAddToDailyBoard({
-                  taskId: SAMPLE_PROJECT.id,
-                  projectId: SAMPLE_PROJECT.id,
-                  projectName: SAMPLE_PROJECT.projectName,
-                  taskTitle: SAMPLE_PROJECT.taskTitle,
-                  details: SAMPLE_PROJECT.details,
-                  urgency: SAMPLE_PROJECT.urgency
-                })}
-                className={`px-4 py-2.5 rounded-xl font-extrabold text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                  dailyBoard.some(b => b.taskTitle === SAMPLE_PROJECT.taskTitle)
-                    ? 'bg-emerald-500 text-white cursor-not-allowed'
-                    : 'bg-white text-indigo-950 hover:bg-indigo-50'
-                }`}
-              >
-                {dailyBoard.some(b => b.taskTitle === SAMPLE_PROJECT.taskTitle) ? (
-                  <>
-                    <Check size={16} />
-                    <span>Added to Daily Entry</span>
-                  </>
+                {dailyWorkRows.length === 0 ? (
+                  <div className="py-8 text-center space-y-2 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    <FileText className="w-8 h-8 text-slate-300 mx-auto" />
+                    <p className="text-xs font-bold text-[#0F172A]">No daily work added yet.</p>
+                    <p className="text-xs text-[#64748B]">Choose a task above and add it to Daily Entry.</p>
+                  </div>
                 ) : (
-                  <>
-                    <Plus size={16} />
-                    <span>Add to Daily Entry</span>
-                  </>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[640px]">
+                      <thead>
+                        <tr className="bg-[#F8FAFC] text-[#0F172A] text-xs font-extrabold uppercase tracking-wider border-b border-[#E2E8F0]">
+                          <th className="py-3.5 px-4 w-[22%]">Project</th>
+                          <th className="py-3.5 px-4 w-[26%]">Task</th>
+                          <th className="py-3.5 px-4 w-[36%]">Description</th>
+                          <th className="py-3.5 px-4 w-[16%] text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E2E8F0] text-sm text-[#0F172A]">
+                        {dailyWorkRows.map(item => (
+                          <tr key={item.id} className="hover:bg-[#F8FAFC] transition-colors">
+                            <td className="py-3.5 px-4 font-bold align-top">{item.projectName}</td>
+                            <td className="py-3.5 px-4 font-semibold align-top">{item.taskTitle}</td>
+                            <td className="py-3.5 px-4 align-top text-[#64748B]">{item.description || '-'}</td>
+                            <td className="py-3.5 px-4 text-center align-top">
+                              {item.boardId ? (
+                                <button
+                                  onClick={() => setRemoveTargetId(item.boardId)}
+                                  className="px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg transition cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleDeleteDailyEntry(item.entryId)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                  title="Delete daily entry"
+                                  aria-label={`Delete ${item.taskTitle} from Daily Work`}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-              </button>
+              </section>
             </div>
 
           </div>
@@ -1551,10 +1315,10 @@ const EmployeeDashboard: React.FC = () => {
                     <span>+ Add Daily Work</span>
                   </button>
                   <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700">
-                    Today&apos;s Hours: <span className={isHoursExceeded ? 'text-rose-600 font-black' : 'text-indigo-600 font-extrabold'}>{allocatedHours.toFixed(1)}</span> / 8.0 Hrs
+                    Today&apos;s Hours: <span className={isHoursExceeded ? 'text-rose-600 font-black' : 'text-indigo-600 font-extrabold'}>{formatHoursMinutes(allocatedHours)}</span> / 8 Hours
                   </div>
                   <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-xl text-xs font-bold text-blue-900 shadow-xs">
-                    Free Hours (8 - today&apos;s Hours): <span className="font-black text-blue-700">{freeHours.toFixed(1)} Hrs</span>
+                    Free Time: <span className="font-black text-blue-700">{formatHoursMinutes(freeHours)}</span>
                   </div>
                 </div>
               </div>
@@ -1579,13 +1343,13 @@ const EmployeeDashboard: React.FC = () => {
               )}
 
               {/* Section 8 Table Interface */}
-              {dailyBoard.length === 0 ? (
+              {dailyBoard.length === 0 && todayEntries.length === 0 ? (
                 /* Empty State */
                 <div className="text-center py-16 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
                   <ListTodo size={42} className="mx-auto text-slate-300 mb-3" />
-                  <h3 className="text-base font-bold text-slate-800">No daily entry tasks available</h3>
+                  <h3 className="text-base font-bold text-slate-800">No tasks added to today&apos;s Daily Entry.</h3>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                    Select an assigned task or Office Works preset below to add it to your Daily Entry Task Board.
+                    Select one of your assigned tasks below to add it to your Daily Entry Task Board.
                   </p>
                   <button
                     onClick={() => {
@@ -1598,17 +1362,18 @@ const EmployeeDashboard: React.FC = () => {
                     <span>Browse & Add Tasks</span>
                   </button>
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse min-w-[900px]">
+              ) : dailyBoard.length > 0 ? (
+                <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
+                  <table className="w-full text-left border-collapse min-w-[1100px]">
                     <thead>
-                      <tr className="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200">
-                        <th className="py-3.5 px-4 w-[20%] rounded-tl-xl">Project</th>
-                        <th className="py-3.5 px-4 w-[25%]">Task</th>
-                        <th className="py-3.5 px-4 w-[30%] bg-emerald-100/70 text-emerald-950 border-x border-emerald-300">
+                      <tr className="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10">
+                        <th className="py-3.5 px-4 w-[10%] rounded-tl-xl">Project</th>
+                        <th className="py-3.5 px-4 w-[15%]">Task</th>
+                        <th className="py-3.5 px-4 w-[15%]">Description</th>
+                        <th className="py-3.5 px-4 w-[36%] bg-emerald-100/70 text-emerald-950 border-x border-emerald-300">
                           Action Taken * (Green Entry)
                         </th>
-                        <th className="py-3.5 px-4 w-[12%] bg-slate-100 text-slate-800 border-r border-slate-200 text-center">
+                        <th className="py-3.5 px-4 w-[9%] bg-slate-100 text-slate-800 border-r border-slate-200 text-center">
                           Date * (Auto)
                         </th>
                         <th className="py-3.5 px-4 w-[8%] bg-emerald-100/70 text-emerald-950 border-r border-emerald-300 text-center">
@@ -1632,23 +1397,26 @@ const EmployeeDashboard: React.FC = () => {
                             {/* Task */}
                             <td className="py-3.5 px-4 align-top">
                               <p className="font-bold text-slate-900">{item.taskTitle}</p>
-                              {item.details && (
-                                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{item.details}</p>
-                              )}
                               <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-black rounded ${
                                 item.urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
                                 item.urgency === 'LESS URGENT' ? 'bg-amber-100 text-amber-800' :
-                                item.urgency === 'UPCOMING' ? 'bg-purple-100 text-purple-800' :
+                                item.urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
+                                item.urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
                                 'bg-indigo-100 text-indigo-800'
                               }`}>
                                 {item.urgency}
                               </span>
                             </td>
 
+                            {/* Original Task Description */}
+                            <td className="py-3.5 px-4 align-top text-slate-600">
+                              {item.details || <span className="italic text-slate-400">No description available</span>}
+                            </td>
+
                             {/* Action Taken (Green Required Field) */}
                             <td className="py-3.5 px-4 bg-emerald-50/40 border-x border-emerald-200 align-top">
                               <textarea
-                                rows={2}
+                                rows={3}
                                 value={item.actionTaken}
                                 onChange={(e) => updateBoardItem(item.boardId, { actionTaken: e.target.value })}
                                 placeholder="Enter completed work details..."
@@ -1738,6 +1506,47 @@ const EmployeeDashboard: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
+              ) : null}
+
+              {todayEntries.length > 0 && (
+                <section className="space-y-3">
+                  <div>
+                    <h3 className="text-base font-bold text-[#0F172A]">Submitted Today</h3>
+                    <p className="text-xs text-[#64748B]">Saved Daily Entry records for {todayDateStr}.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[900px]">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200">
+                          <th className="py-3 px-4">Project</th>
+                          <th className="py-3 px-4">Task</th>
+                          <th className="py-3 px-4">Description</th>
+                          <th className="py-3 px-4">Action Taken</th>
+                          <th className="py-3 px-4 text-center">Date</th>
+                          <th className="py-3 px-4 text-center">Hours</th>
+                          <th className="py-3 px-4 text-center">Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 text-xs">
+                        {todayEntries.map((entry, index) => (
+                          <tr key={entry.id || entry._id || `today-entry-${index}`}>
+                            <td className="py-3 px-4 font-bold text-slate-900">{entry.projectName || 'Project'}</td>
+                            <td className="py-3 px-4 font-semibold text-slate-900">{entry.taskTitle}</td>
+                            <td className="py-3 px-4 text-slate-600">{entry.details || '—'}</td>
+                            <td className="py-3 px-4 text-slate-700">{entry.actionTaken}</td>
+                            <td className="py-3 px-4 text-center whitespace-nowrap">{entry.date}</td>
+                            <td className="py-3 px-4 text-center font-bold">{Number(entry.hours).toFixed(1)}</td>
+                            <td className="py-3 px-4 text-center">
+                              {entry.flagged ? (
+                                <span className="text-amber-800" title={entry.flagComment || 'Flagged'}>Flagged</span>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
               )}
 
               {/* Submit Button Section */}
@@ -1763,17 +1572,17 @@ const EmployeeDashboard: React.FC = () => {
               )}
             </div>
 
-            {/* Available Assigned Project Tasks & Office Works Catalog */}
+            {/* Available assigned tasks */}
             <div id="available-tasks-section" className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
                 <div>
-                  <h3 className="text-lg font-black text-[#172554]">Assigned Tasks & Office Works Catalog</h3>
+                  <h3 className="text-lg font-black text-[#172554]">Assigned Tasks</h3>
                   <p className="text-xs text-slate-500">Select tasks to add them into your Daily Entry Task Board</p>
                 </div>
 
                 {/* Urgency Filter Category Buttons */}
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {['ALL', 'URGENT', 'LESS URGENT', 'UPCOMING', 'DAILY TASK'].map(urg => (
+                  {['ALL', 'URGENT', 'LESS URGENT', 'LOW URGENT', 'SELF DEFINED', 'DAILY TASK'].map(urg => (
                     <button
                       key={urg}
                       onClick={() => setUrgencyFilter(urg)}
@@ -1789,65 +1598,18 @@ const EmployeeDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* 1. Sample ZP-School */}
-                {(urgencyFilter === 'ALL' || urgencyFilter === 'URGENT') && (
-                  <div className="border border-red-200 rounded-xl p-4 bg-red-50/20 shadow-xs space-y-3">
-                    <div className="flex justify-between items-start">
-                      <span className="px-2.5 py-0.5 text-[10px] font-black rounded bg-red-100 text-red-800">
-                        URGENT
-                      </span>
-                      <span className="text-xs font-bold text-slate-500">{SAMPLE_PROJECT.projectName}</span>
-                    </div>
-
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-sm">{SAMPLE_PROJECT.taskTitle}</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">{SAMPLE_PROJECT.details}</p>
-                    </div>
-
-                    <button
-                      disabled={dailyBoard.some(b => b.taskTitle === SAMPLE_PROJECT.taskTitle)}
-                      onClick={() => handleAddToDailyBoard({
-                        taskId: SAMPLE_PROJECT.id,
-                        projectId: SAMPLE_PROJECT.id,
-                        projectName: SAMPLE_PROJECT.projectName,
-                        taskTitle: SAMPLE_PROJECT.taskTitle,
-                        details: SAMPLE_PROJECT.details,
-                        urgency: 'URGENT'
-                      })}
-                      className={`w-full py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                        dailyBoard.some(b => b.taskTitle === SAMPLE_PROJECT.taskTitle)
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-not-allowed'
-                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
-                      }`}
-                    >
-                      {dailyBoard.some(b => b.taskTitle === SAMPLE_PROJECT.taskTitle) ? (
-                        <>
-                          <Check size={14} />
-                          <span>Added to Board</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus size={14} />
-                          <span>Add to Daily Entry</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-
-                {/* 2. Real Assigned Tasks */}
-                {tasks
-                  .filter(t => t.status !== 'Completed')
-                  .filter(t => {
-                    if (urgencyFilter === 'ALL') return true;
-                    const urg = getUrgencyFromPriority(t.priority);
-                    return urg.includes(urgencyFilter);
-                  })
-                  .map(t => {
+              {availableAssignedTasks.length === 0 ? (
+                <div className="py-10 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <ListTodo size={34} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-xs text-slate-500">No assigned tasks available in this category.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {availableAssignedTasks.map(t => {
                     const taskId = t.id || t._id || '';
                     const urgency = getUrgencyFromPriority(t.priority);
-                    const isAdded = dailyBoard.some(b => b.taskId === taskId || b.taskTitle === t.title);
+                    const isAdded = dailyBoard.some(b => b.taskId === taskId) ||
+                      todayEntries.some(entry => entry.taskId === taskId);
 
                     return (
                       <div key={taskId} className="border border-slate-200 rounded-xl p-4 bg-white shadow-xs space-y-3 hover:border-indigo-200 transition">
@@ -1855,7 +1617,8 @@ const EmployeeDashboard: React.FC = () => {
                           <span className={`px-2.5 py-0.5 text-[10px] font-black rounded ${
                             urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
                             urgency === 'LESS URGENT' ? 'bg-amber-100 text-amber-800' :
-                            urgency === 'UPCOMING' ? 'bg-purple-100 text-purple-800' :
+                            urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
+                            urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
                             'bg-indigo-100 text-indigo-800'
                           }`}>
                             {urgency}
@@ -1899,7 +1662,8 @@ const EmployeeDashboard: React.FC = () => {
                       </div>
                     );
                   })}
-              </div>
+                </div>
+              )}
             </div>
 
           </div>
@@ -2038,14 +1802,13 @@ const EmployeeDashboard: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
             <div className="border-b border-slate-200 pb-4">
               <h3 className="text-lg font-black text-[#172554]">Completed Task History</h3>
-              <p className="text-xs text-slate-500">Only Director-approved & fully completed task records</p>
+              <p className="text-xs text-slate-500">All completed task records for historical reference</p>
             </div>
 
-            {tasks.filter(t => t.status === 'Completed' && t.approvedBy).length === 0 ? (
+            {tasks.filter(t => t.status === 'Completed').length === 0 ? (
               <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                 <CheckCircle2 size={36} className="mx-auto text-slate-300 mb-2" />
                 <p className="text-sm font-bold text-slate-700">No completed task history available.</p>
-                <p className="text-xs text-slate-500 mt-1">Tasks appear here only after 100% submission and Director approval.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -2058,21 +1821,19 @@ const EmployeeDashboard: React.FC = () => {
                       <th className="py-3.5 px-4">Completion Date</th>
                       <th className="py-3.5 px-4 text-center">Completion Status</th>
                       <th className="py-3.5 px-4 text-center">Work Done %</th>
-                      <th className="py-3.5 px-4 text-center">Hours Worked</th>
+                      <th className="py-3.5 px-4 text-center">Time Spent</th>
                       <th className="py-3.5 px-4">Action Taken</th>
-                      <th className="py-3.5 px-4">Relevant Remarks</th>
-                      <th className="py-3.5 px-4 text-center">Approval Status</th>
+                      <th className="py-3.5 px-4">Role Remarks</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 font-medium">
                     {tasks
-                      .filter(t => t.status === 'Completed' && t.approvedBy)
+                      .filter(t => t.status === 'Completed')
                       .map(t => {
                         const taskIdStr = t.id || t._id;
                         const taskEntries = dailyHistory.filter(e => e.taskId === taskIdStr);
                         const hoursWorked = taskEntries.reduce((acc, e) => acc + (Number(e.hours) || 0), 0);
                         const actionTaken = taskEntries.length > 0 ? taskEntries[0].actionTaken : (t.description || '-');
-                        const remarks = t.approvalRemarks || t.description || '-';
                         const compDate = t.approvalDate
                           ? new Date(t.approvalDate).toLocaleDateString('en-IN')
                           : (t.updatedAt ? new Date(t.updatedAt).toLocaleDateString('en-IN') : todayDateStr);
@@ -2091,15 +1852,15 @@ const EmployeeDashboard: React.FC = () => {
                             <td className="py-3.5 px-4 text-center font-black text-emerald-600">
                               100%
                             </td>
-                            <td className="py-3.5 px-4 text-center font-black text-indigo-600">
-                              {hoursWorked > 0 ? `${hoursWorked.toFixed(1)} hrs` : '-'}
+                            <td className="py-3.5 px-4 text-center font-black text-indigo-600 whitespace-nowrap">
+                              {hoursWorked > 0 ? formatHoursMinutes(hoursWorked) : '-'}
                             </td>
                             <td className="py-3.5 px-4 text-slate-700">{actionTaken}</td>
-                            <td className="py-3.5 px-4 text-slate-600">{remarks}</td>
-                            <td className="py-3.5 px-4 text-center">
-                              <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-blue-100 text-blue-800">
-                                Director Approved
-                              </span>
+                            <td className="py-3.5 px-4 text-slate-600 space-y-1">
+                              <div><span className="font-bold text-slate-700">Employee Remark:</span> {t.employeeRemark || actionTaken || 'None'}</div>
+                              <div><span className="font-bold text-slate-700">Director Remark:</span> {t.directorRemark || t.approvalRemarks || 'None'}</div>
+                              <div><span className="font-bold text-slate-700">Project Head Remark:</span> {t.projectHeadRemark || 'None'}</div>
+                              <div><span className="font-bold text-slate-700">Status:</span> <span className="font-bold text-emerald-700">{t.status}</span></div>
                             </td>
                           </tr>
                         );
@@ -2187,39 +1948,127 @@ const EmployeeDashboard: React.FC = () => {
         {/* TAB 7: MY PERFORMANCE */}
         {activeTab === 'performance' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 gap-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-slate-200 gap-4">
               <div>
                 <h3 className="text-lg font-black text-[#172554]">MY PERFORMANCE</h3>
-                <p className="text-xs text-slate-500">Database-calculated weekly and monthly performance analysis</p>
+                <p className="text-xs text-slate-500">View performance metrics filtered by custom calendar date range</p>
               </div>
 
-              {/* Weekly / Monthly Toggle Buttons */}
-              <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-                <button
-                  onClick={() => setPerfTab('weekly')}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                    perfTab === 'weekly'
-                      ? 'bg-[#2563EB] text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Weekly
-                </button>
-                <button
-                  onClick={() => setPerfTab('monthly')}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                    perfTab === 'monthly'
-                      ? 'bg-[#2563EB] text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Monthly
-                </button>
+              {/* Calendar Date Range Selector & View Toggles */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 p-1.5 rounded-xl text-xs">
+                  <Calendar size={15} className="text-blue-600 flex-shrink-0 ml-1" />
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">From:</label>
+                    <input
+                      type="date"
+                      value={perfStartDate}
+                      onChange={(e) => {
+                        setPerfStartDate(e.target.value);
+                        setPerfTab('custom');
+                        handleApplyPerfDateRange(e.target.value, perfEndDate);
+                      }}
+                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">To:</label>
+                    <input
+                      type="date"
+                      value={perfEndDate}
+                      onChange={(e) => {
+                        setPerfEndDate(e.target.value);
+                        setPerfTab('custom');
+                        handleApplyPerfDateRange(perfStartDate, e.target.value);
+                      }}
+                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  <button
+                    onClick={() => {
+                      setPerfTab('custom');
+                      handleApplyPerfDateRange(perfStartDate, perfEndDate);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      perfTab === 'custom'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Calendar Range
+                  </button>
+                  <button
+                    onClick={() => setPerfTab('weekly')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      perfTab === 'weekly'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Weekly
+                  </button>
+                  <button
+                    onClick={() => setPerfTab('monthly')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      perfTab === 'monthly'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Monthly
+                  </button>
+                </div>
               </div>
             </div>
 
+            {/* Selected Date Range Display Badge */}
+            <div className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 inline-flex items-center gap-2">
+              <Calendar size={14} className="text-indigo-600" />
+              <span>Viewing Performance Period: <span className="font-extrabold text-indigo-950">{perfTab === 'weekly' ? 'Current Week' : perfTab === 'monthly' ? 'Current Month' : `${perfStartDate} to ${perfEndDate}`}</span></span>
+            </div>
+
             {/* Performance Cards */}
-            {perfTab === 'weekly' ? (
+            {perfTab === 'custom' ? (
+              <div className="space-y-4">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">SELECTED PERIOD PERFORMANCE ({perfStartDate} to {perfEndDate})</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
+                    <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
+                    <p className="text-2xl font-black text-blue-950">
+                      {performance?.custom?.workDone ?? performance?.weekly?.workDone ?? performance?.tasksCompleted ?? 0}
+                    </p>
+                    <p className="text-[11px] text-blue-600 font-medium">Completed task entries in selected period</p>
+                  </div>
+
+                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
+                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
+                    <p className="text-lg font-black text-emerald-950">
+                      {formatHoursMinutes(performance?.custom?.workHours ?? performance?.weekly?.workHours ?? 0)}
+                    </p>
+                    <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
+                  </div>
+
+                  <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
+                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
+                    <p className="text-lg font-black text-purple-950">
+                      {formatHoursMinutes(performance?.custom?.freeHours ?? performance?.weekly?.freeHours ?? 0)}
+                    </p>
+                    <p className="text-[11px] text-purple-600 font-medium">Available standard working capacity</p>
+                  </div>
+
+                  <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
+                    <p className="text-xs font-bold text-amber-700 uppercase tracking-wider">Marking</p>
+                    <p className="text-2xl font-black text-amber-950">
+                      {performance?.custom?.marking ?? performance?.directorRating ?? 4.5} <span className="text-sm font-bold">/ 5</span>
+                    </p>
+                    <p className="text-[11px] text-amber-600 font-medium">Director score (Read-only)</p>
+                  </div>
+                </div>
+              </div>
+            ) : perfTab === 'weekly' ? (
               <div className="space-y-4">
                 <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">WEEKLY PERFORMANCE</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2232,19 +2081,19 @@ const EmployeeDashboard: React.FC = () => {
                   </div>
 
                   <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Work Hours</p>
-                    <p className="text-2xl font-black text-emerald-950">
-                      {performance?.weekly?.workHours ?? 0} <span className="text-sm font-bold">hrs</span>
+                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
+                    <p className="text-lg font-black text-emerald-950">
+                      {formatHoursMinutes(performance?.weekly?.workHours ?? 0)}
                     </p>
                     <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
                   </div>
 
                   <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Hours</p>
-                    <p className="text-2xl font-black text-purple-950">
-                      {performance?.weekly?.freeHours ?? 0} <span className="text-sm font-bold">hrs</span>
+                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
+                    <p className="text-lg font-black text-purple-950">
+                      {formatHoursMinutes(performance?.weekly?.freeHours ?? 0)}
                     </p>
-                    <p className="text-[11px] text-purple-600 font-medium">(40 hrs standard - Work Hours)</p>
+                    <p className="text-[11px] text-purple-600 font-medium">(40 hrs standard capacity)</p>
                   </div>
 
                   <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
@@ -2269,19 +2118,19 @@ const EmployeeDashboard: React.FC = () => {
                   </div>
 
                   <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Work Hours</p>
-                    <p className="text-2xl font-black text-emerald-950">
-                      {performance?.monthly?.workHours ?? 0} <span className="text-sm font-bold">hrs</span>
+                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
+                    <p className="text-lg font-black text-emerald-950">
+                      {formatHoursMinutes(performance?.monthly?.workHours ?? 0)}
                     </p>
                     <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
                   </div>
 
                   <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Hours</p>
-                    <p className="text-2xl font-black text-purple-950">
-                      {performance?.monthly?.freeHours ?? 0} <span className="text-sm font-bold">hrs</span>
+                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
+                    <p className="text-lg font-black text-purple-950">
+                      {formatHoursMinutes(performance?.monthly?.freeHours ?? 0)}
                     </p>
-                    <p className="text-[11px] text-purple-600 font-medium">(176 hrs standard - Work Hours)</p>
+                    <p className="text-[11px] text-purple-600 font-medium">(176 hrs standard capacity)</p>
                   </div>
 
                   <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
@@ -2297,27 +2146,60 @@ const EmployeeDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 7: FLAGS */}
+        {/* TAB 8: FLAGS */}
         {activeTab === 'flags' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-            <div className="border-b border-slate-200 pb-4">
-              <h3 className="text-lg font-black text-[#172554]">Flags</h3>
-              <p className="text-xs text-slate-500">Task flags under management review</p>
+            <div className="border-b border-slate-200 pb-4 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-black text-[#172554]">All Flags List</h3>
+                <p className="text-xs text-slate-500">All flagged tasks recorded across projects</p>
+              </div>
+              <span className="px-3 py-1 bg-rose-100 text-rose-800 text-xs font-bold rounded-full border border-rose-200">
+                Total Flags: {flags.length}
+              </span>
             </div>
 
-            <div className="space-y-4">
-              {flags.map(f => (
-                <div key={f.id || f._id} className="p-4 border border-rose-200 bg-rose-50/20 rounded-xl text-xs space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="font-bold text-slate-900">{f.taskTitle}</p>
-                    <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-100 text-rose-800">
-                      {f.status}
-                    </span>
+            {flags.length === 0 ? (
+              <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <FlagIcon size={36} className="mx-auto text-slate-300 mb-2" />
+                <p className="text-sm font-bold text-slate-700">No flags recorded.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {flags.map(f => (
+                  <div key={f.id || f._id} className="p-4 border border-slate-200 bg-slate-50/60 rounded-xl text-xs space-y-3 hover:border-rose-300 transition">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
+                      <div>
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 mr-2">
+                          {f.projectName || 'Project'}
+                        </span>
+                        <span className="font-bold text-slate-900 text-sm">{f.taskTitle}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-semibold text-[11px]">{f.flagDate}</span>
+                        <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full ${
+                          f.status === 'Open' ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        }`}>
+                          {f.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Flag Reason / Details:</p>
+                      <p className="text-slate-800 bg-white p-2.5 rounded-lg border border-slate-200 font-medium">{f.flagMessage}</p>
+                    </div>
+
+                    {f.managementResponse && (
+                      <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg text-emerald-900">
+                        <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider mb-0.5">Management Response:</p>
+                        <p className="font-medium">{f.managementResponse}</p>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-slate-700">{f.flagMessage}</p>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -2460,10 +2342,9 @@ const EmployeeDashboard: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    disabled={isSavingDailyWork}
-                    className="px-5 py-2.5 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:bg-slate-300 disabled:cursor-not-allowed"
+                    className="px-5 py-2.5 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    {isSavingDailyWork ? 'Saving...' : 'Add Work'}
+                    Add to Board
                   </button>
                 </div>
               </form>

@@ -115,6 +115,9 @@ export interface Task {
   dueDate?: string;
   rating?: number; // Director only (1-5)
   privateComment?: string; // Director only
+  employeeRemark?: string;
+  directorRemark?: string;
+  projectHeadRemark?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -149,6 +152,8 @@ export interface Flag {
   _id?: string;
   taskId: string;
   taskTitle?: string;
+  projectId?: string;
+  projectName?: string;
   employeeId: string;
   employeeName?: string;
   createdBy?: string;
@@ -240,6 +245,14 @@ export interface EmployeePerformance {
     marking: number;
   };
   monthly?: {
+    workDone: number;
+    workHours: number;
+    freeHours: number;
+    marking: number;
+  };
+  custom?: {
+    startDate?: string;
+    endDate?: string;
     workDone: number;
     workHours: number;
     freeHours: number;

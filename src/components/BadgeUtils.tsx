@@ -128,3 +128,17 @@ export const SkeletonTable: React.FC = () => (
     </div>
   </div>
 );
+
+export function formatHoursMinutes(hoursNum: number): string {
+  const totalMinutes = Math.round((Number(hoursNum) || 0) * 60);
+  if (totalMinutes <= 0) return '0 Minutes';
+  const hrs = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hrs > 0 && mins > 0) {
+    return `${hrs} ${hrs === 1 ? 'Hour' : 'Hours'} ${mins} ${mins === 1 ? 'Minute' : 'Minutes'}`;
+  } else if (hrs > 0) {
+    return `${hrs} ${hrs === 1 ? 'Hour' : 'Hours'}`;
+  } else {
+    return `${mins} ${mins === 1 ? 'Minute' : 'Minutes'}`;
+  }
+}

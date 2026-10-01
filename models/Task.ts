@@ -19,6 +19,9 @@ export interface ITask extends Document {
   approvedBy?: string
   approvalDate?: Date
   approvalRemarks?: string
+  employeeRemark?: string
+  directorRemark?: string
+  projectHeadRemark?: string
   flagStatus?: 'Open' | 'Resolved' | 'None'
   flagMessage?: string
   flagDate?: string
@@ -66,6 +69,9 @@ const taskSchema = new Schema<ITask>({
   approvedBy: { type: String },
   approvalDate: { type: Date },
   approvalRemarks: { type: String },
+  employeeRemark: { type: String },
+  directorRemark: { type: String },
+  projectHeadRemark: { type: String },
   flagStatus: { type: String, enum: ['Open', 'Resolved', 'None'], default: 'None' },
   flagMessage: { type: String },
   flagDate: { type: String },

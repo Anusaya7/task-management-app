@@ -25,7 +25,8 @@ import {
   EmployeeStatusBadge,
   EmployeeAvatar,
   SkeletonCard,
-  SkeletonTable
+  SkeletonTable,
+  formatHoursMinutes
 } from './BadgeUtils';
 import {
   FolderOpen,
@@ -136,7 +137,11 @@ const Dashboard: React.FC = () => {
   const [reminderStatusFilter, setReminderStatusFilter] = useState<'ALL' | 'TODAY' | 'UPCOMING' | 'OVERDUE' | 'NOT_REPLIED'>('ALL');
 
   // Flags Filter
-  const [flagStatusFilter, setFlagStatusFilter] = useState<'OPEN' | 'RESOLVED' | 'ALL'>('OPEN');
+  const [flagStatusFilter, setFlagStatusFilter] = useState<'OPEN' | 'RESOLVED' | 'ALL'>('ALL');
+
+  // Performance Date Range Filter
+  const [dashPerfStartDate, setDashPerfStartDate] = useState<string>('2026-09-01');
+  const [dashPerfEndDate, setDashPerfEndDate] = useState<string>('2026-10-01');
 
   const fetchData = async (isInitial = false) => {
     try {
@@ -1056,31 +1061,31 @@ const Dashboard: React.FC = () => {
                 <p className="text-sm font-bold text-[#0F172A]">No daily work entries found matching filters.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="bg-[#F8FAFC] text-[#64748B] uppercase font-bold text-[11px] border-b border-[#E2E8F0]">
-                      <th className="p-3.5">Project</th>
-                      <th className="p-3.5">Task</th>
-                      <th className="p-3.5">Description</th>
-                      <th className="p-3.5">Action Taken</th>
-                      <th className="p-3.5">Employee</th>
-                      <th className="p-3.5 text-center">Date</th>
-                      <th className="p-3.5 text-center">Hours</th>
-                      <th className="p-3.5 text-center">Status</th>
+                    <tr className="bg-[#F8FAFC] text-[#64748B] uppercase font-bold text-[11px] border-b border-[#E2E8F0] sticky top-0 z-10">
+                      <th className="p-3.5 w-[10%]">Project</th>
+                      <th className="p-3.5 w-[15%]">Task</th>
+                      <th className="p-3.5 w-[15%]">Description</th>
+                      <th className="p-3.5 w-[36%] bg-emerald-50 text-emerald-950 border-x border-emerald-200">Action Taken</th>
+                      <th className="p-3.5 w-[10%]">Employee</th>
+                      <th className="p-3.5 w-[8%] text-center">Date</th>
+                      <th className="p-3.5 w-[8%] text-center bg-emerald-50 text-emerald-950 border-x border-emerald-200">Time Spent</th>
+                      <th className="p-3.5 w-[8%] text-center">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E2E8F0]">
                     {filteredDailyBoard.map(entry => (
                       <tr key={entry.id || entry._id} className="hover:bg-[#F8FAFC] transition">
-                        <td className="p-3.5 font-bold text-[#0F172A]">{entry.projectName}</td>
-                        <td className="p-3.5 font-semibold text-[#0F172A]">{entry.taskTitle}</td>
-                        <td className="p-3.5 text-[#64748B] max-w-xs">{entry.details || '-'}</td>
-                        <td className="p-3.5 text-[#0F172A] max-w-xs">{entry.actionTaken}</td>
-                        <td className="p-3.5 font-bold text-[#334155]">{entry.employeeName}</td>
-                        <td className="p-3.5 text-center font-semibold text-[#64748B] whitespace-nowrap">{entry.date}</td>
-                        <td className="p-3.5 text-center font-extrabold text-[#2563EB]">{entry.hours} hrs</td>
-                        <td className="p-3.5 text-center">
+                        <td className="p-3.5 font-bold text-[#0F172A] align-top">{entry.projectName}</td>
+                        <td className="p-3.5 font-semibold text-[#0F172A] align-top">{entry.taskTitle}</td>
+                        <td className="p-3.5 text-[#64748B] align-top">{entry.details || '-'}</td>
+                        <td className="p-3.5 text-[#0F172A] font-medium bg-emerald-50/30 border-x border-emerald-100 align-top whitespace-pre-wrap">{entry.actionTaken}</td>
+                        <td className="p-3.5 font-bold text-[#334155] align-top">{entry.employeeName}</td>
+                        <td className="p-3.5 text-center font-semibold text-[#64748B] whitespace-nowrap align-top">{entry.date}</td>
+                        <td className="p-3.5 text-center font-extrabold text-[#2563EB] bg-emerald-50/30 border-x border-emerald-100 whitespace-nowrap align-top">{formatHoursMinutes(entry.hours)}</td>
+                        <td className="p-3.5 text-center align-top">
                           <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                             {entry.status || 'Submitted'}
                           </span>
@@ -1273,19 +1278,36 @@ const Dashboard: React.FC = () => {
               ) : (
                 <div className="space-y-3">
                   {completedTasks.map(t => (
-                    <div key={t.id || t._id} className="border border-[#BBF7D0] rounded-xl p-4 bg-[#F0FDF4]/50 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div>
-                        <h4 className="font-bold text-[#0F172A] text-sm">{t.title}</h4>
-                        <p className="text-xs text-[#64748B] mt-0.5">
-                          Project: <span className="font-semibold text-[#334155]">{t.projectName}</span> &bull; Staff: <span className="font-semibold text-[#334155]">{t.assignedEmployeeNames?.join(', ')}</span>
-                        </p>
-                        {t.approvalRemarks && (
-                          <p className="text-xs text-[#475569] mt-1 italic">&quot;{t.approvalRemarks}&quot;</p>
-                        )}
+                    <div key={t.id || t._id} className="border border-[#BBF7D0] rounded-xl p-4 bg-[#F0FDF4]/50 flex flex-col space-y-2">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[#BBF7D0]/60 pb-2">
+                        <div>
+                          <h4 className="font-bold text-[#0F172A] text-sm">{t.title}</h4>
+                          <p className="text-xs text-[#64748B] mt-0.5">
+                            Project: <span className="font-semibold text-[#334155]">{t.projectName}</span> &bull; Staff: <span className="font-semibold text-[#334155]">{t.assignedEmployeeNames?.join(', ')}</span>
+                          </p>
+                        </div>
+                        <span className="px-3 py-1 text-xs font-bold rounded-full bg-[#16A34A] text-white self-start md:self-auto flex-shrink-0">
+                          Completed 100%
+                        </span>
                       </div>
-                      <span className="px-3 py-1 text-xs font-bold rounded-full bg-[#16A34A] text-white self-start md:self-auto flex-shrink-0">
-                        Completed 100%
-                      </span>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs pt-1">
+                        <div className="bg-white/80 p-2 rounded border border-[#E2E8F0]">
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase">Employee Remark:</span>
+                          <span className="text-slate-800">{t.employeeRemark || t.description || 'None'}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded border border-[#E2E8F0]">
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase">Director Remark:</span>
+                          <span className="text-slate-800">{t.directorRemark || t.approvalRemarks || 'None'}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded border border-[#E2E8F0]">
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase">Project Head Remark:</span>
+                          <span className="text-slate-800">{t.projectHeadRemark || 'None'}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded border border-[#E2E8F0]">
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase">Status:</span>
+                          <span className="font-bold text-emerald-700">{t.status}</span>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1423,7 +1445,12 @@ const Dashboard: React.FC = () => {
                       <div key={flagId} className="border border-[#E2E8F0] rounded-xl p-4 bg-[#F8FAFC] space-y-3">
                         <div className="flex justify-between items-start">
                           <div>
-                            <h4 className="font-bold text-[#0F172A] text-sm">{flag.taskTitle}</h4>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase rounded bg-blue-100 text-blue-800 border border-blue-200">
+                                {flag.projectName || 'Project'}
+                              </span>
+                              <h4 className="font-bold text-[#0F172A] text-sm">{flag.taskTitle}</h4>
+                            </div>
                             <p className="text-xs text-[#64748B]">
                               Raised by <span className="font-semibold text-[#334155]">{flag.employeeName}</span> on {flag.flagDate}
                             </p>
@@ -1471,9 +1498,37 @@ const Dashboard: React.FC = () => {
         {/* TAB 8: MY PERFORMANCE */}
         {activeTab === 'performance' && (
           <div className="bg-white rounded-[14px] border border-[#E2E8F0] p-6 shadow-xs space-y-6">
-            <div className="border-b border-[#E2E8F0] pb-4">
-              <h3 className="text-lg font-bold text-[#0F172A]">My Director Performance Metrics</h3>
-              <p className="text-xs text-[#64748B]">Real-time activity stats &amp; management output calculated strictly from database records</p>
+            <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-[#E2E8F0] gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-[#0F172A]">My Performance Metrics</h3>
+                <p className="text-xs text-[#64748B]">Real-time activity stats &amp; management output filtered by custom date range</p>
+              </div>
+
+              {/* Calendar Date Range Selector */}
+              <div className="flex items-center gap-2 bg-[#F8FAFC] border border-[#CBD5E1] p-1.5 rounded-xl text-xs">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-[10px] font-bold text-[#64748B] uppercase">Start Date:</label>
+                  <input
+                    type="date"
+                    value={dashPerfStartDate}
+                    onChange={(e) => setDashPerfStartDate(e.target.value)}
+                    className="bg-white border border-[#CBD5E1] rounded-lg px-2 py-1 text-xs font-bold text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <label className="text-[10px] font-bold text-[#64748B] uppercase">End Date:</label>
+                  <input
+                    type="date"
+                    value={dashPerfEndDate}
+                    onChange={(e) => setDashPerfEndDate(e.target.value)}
+                    className="bg-white border border-[#CBD5E1] rounded-lg px-2 py-1 text-xs font-bold text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 inline-flex items-center gap-2">
+              <span>Selected Performance Period: <span className="font-extrabold text-indigo-950">{dashPerfStartDate} to {dashPerfEndDate}</span></span>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
