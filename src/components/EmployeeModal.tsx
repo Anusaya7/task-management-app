@@ -35,6 +35,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!isOpen) return;
+
     if (employee) {
       setFirstName(employee.firstName || '');
       setLastName(employee.lastName || '');
@@ -55,7 +57,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setNewPassword('');
     }
     setError('');
-  }, [employee, isOpen]);
+  }, [isOpen, employee?.id || (employee as any)?._id]);
 
   if (!isOpen) return null;
 

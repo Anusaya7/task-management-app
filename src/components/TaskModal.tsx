@@ -34,7 +34,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // Only initialize form values when the modal transition opens (isOpen becomes true) or target task changes
   useEffect(() => {
+    if (!isOpen) return;
+
     if (task) {
       setTitle(task.title || '');
       setDescription(task.description || '');
@@ -51,7 +54,14 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setReminderDate('');
     }
     setError('');
-  }, [task, isOpen, isEmployee, user, projects]);
+  }, [isOpen, task?.id || (task as any)?._id]);
+
+  // If projects list arrives after modal is opened and no project was selected yet, set default project without clearing user input
+  useEffect(() => {
+    if (isOpen && !task && !projectId && projects.length > 0) {
+      setProjectId(projects[0].id || projects[0]._id || '');
+    }
+  }, [isOpen, task, projectId, projects]);
 
   if (!isOpen) return null;
 
@@ -151,13 +161,18 @@ const TaskModal: React.FC<TaskModalProps> = ({
               required
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
             >
-              <option value="">-- Select Project --</option>
+              <option value="">{projects.length === 0 ? '-- No Projects Available (Create Project First) --' : '-- Select Project --'}</option>
               {projects.map(p => (
                 <option key={p.id || p._id} value={p.id || p._id}>
                   {p.projectName} ({p.projectNumber})
                 </option>
               ))}
             </select>
+            {projects.length === 0 && (
+              <p className="text-[11px] font-bold text-amber-600 mt-1">
+                No active projects found. Please click &quot;Create Project&quot; in My Projects tab to add a project first.
+              </p>
+            )}
           </div>
 
           {/* Priority Dropdown (Exact 5 Priorities) */}

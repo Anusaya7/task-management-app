@@ -35,6 +35,8 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!isOpen) return;
+
     if (project) {
       setProjectName(project.projectName || (project as any).name || '');
       setProjectNumber(project.projectNumber || '');
@@ -54,7 +56,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
     }
     setNewRemarkText('');
     setError('');
-  }, [project, isOpen]);
+  }, [isOpen, project?.id || (project as any)?._id]);
 
   if (!isOpen) return null;
 
