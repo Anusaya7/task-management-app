@@ -15,8 +15,10 @@ import {
 } from '../types';
 import Sidebar, { TabType } from './Sidebar';
 import ProjectModal from './ProjectModal';
+import ProjectList from './ProjectList';
 import TaskModal from './TaskModal';
 import EmployeeModal from './EmployeeModal';
+import EmployeeList from './EmployeeList';
 import NotificationCenter from './NotificationCenter';
 import DirectorProfile from './DirectorProfile';
 import {
@@ -577,13 +579,13 @@ const Dashboard: React.FC = () => {
               <span>{todayFormatted}</span>
             </div>
 
-            {isDirector && (
+            {(isDirector || isProjectHead) && (
               <button
                 onClick={() => { setSelectedProject(null); setIsProjectModalOpen(true); }}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0F172A] hover:bg-[#1E293B] text-white font-semibold rounded-lg text-xs shadow-xs transition cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold rounded-lg text-xs shadow-xs transition cursor-pointer"
               >
                 <Plus size={14} />
-                <span>New Project</span>
+                <span>Create Project</span>
               </button>
             )}
 
@@ -1073,6 +1075,7 @@ const Dashboard: React.FC = () => {
                       <th className="p-3.5 w-[10%]">Employee</th>
                       <th className="p-3.5 w-[8%] text-center">Date</th>
                       <th className="p-3.5 w-[8%] text-center bg-emerald-50 text-emerald-950 border-x border-emerald-200">Time Spent</th>
+                      <th className="p-3.5 w-[10%] text-center">Flag</th>
                       <th className="p-3.5 w-[8%] text-center">Status</th>
                     </tr>
                   </thead>
@@ -1086,6 +1089,15 @@ const Dashboard: React.FC = () => {
                         <td className="p-3.5 font-bold text-[#334155] align-top">{entry.employeeName}</td>
                         <td className="p-3.5 text-center font-semibold text-[#64748B] whitespace-nowrap align-top">{entry.date}</td>
                         <td className="p-3.5 text-center font-extrabold text-[#2563EB] bg-emerald-50/30 border-x border-emerald-100 whitespace-nowrap align-top">{formatHoursMinutes(entry.hours)}</td>
+                        <td className="p-3.5 text-center align-top">
+                          {entry.flagged ? (
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-900 border border-amber-300" title={entry.flagComment || 'Flagged'}>
+                              Yes{entry.flagComment ? ` (${entry.flagComment})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">No</span>
+                          )}
+                        </td>
                         <td className="p-3.5 text-center align-top">
                           <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                             {entry.status || 'Submitted'}
@@ -1217,6 +1229,7 @@ const Dashboard: React.FC = () => {
                       <th className="p-3.5">Action Taken</th>
                       <th className="p-3.5 text-center">Hours</th>
                       <th className="p-3.5 text-center">Date</th>
+                      <th className="p-3.5 text-center">Flag</th>
                       <th className="p-3.5 text-center">Status</th>
                     </tr>
                   </thead>
@@ -1230,6 +1243,15 @@ const Dashboard: React.FC = () => {
                         <td className="p-3.5 text-[#0F172A]">{entry.actionTaken}</td>
                         <td className="p-3.5 text-center font-extrabold text-[#2563EB]">{entry.hours} hrs</td>
                         <td className="p-3.5 text-center font-semibold text-[#64748B] whitespace-nowrap">{entry.date}</td>
+                        <td className="p-3.5 text-center">
+                          {entry.flagged ? (
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-900 border border-amber-300" title={entry.flagComment || 'Flagged'}>
+                              Yes{entry.flagComment ? ` (${entry.flagComment})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">No</span>
+                          )}
+                        </td>
                         <td className="p-3.5 text-center">
                           <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                             {entry.status || 'Submitted'}
@@ -1697,6 +1719,30 @@ const Dashboard: React.FC = () => {
               </table>
             </div>
           </div>
+        )}
+
+        {/* TAB 11: PROJECTS */}
+        {activeTab === 'projects' && (
+          <ProjectList
+            projects={filteredProjects}
+            users={employees}
+            onProjectSave={handleSaveProject}
+            onProjectDelete={handleDeleteProject}
+            onProjectComplete={async (project) => {
+              await handleSaveProject({ ...project, status: 'Completed' });
+            }}
+          />
+        )}
+
+        {/* TAB 12: EMPLOYEES */}
+        {activeTab === 'employees' && (
+          <EmployeeList
+            employees={filteredEmployees}
+            projects={projects}
+            tasks={tasks}
+            onEmployeeSave={handleSaveEmployee}
+            onEmployeeDelete={handleDeleteEmployee}
+          />
         )}
 
         {/* Director Private Star Rating Modal */}

@@ -65,8 +65,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
     setSelectedProject(null);
   };
 
-  const canCreateProject = user?.role === 'Director';
-  const canEditProject = user?.role === 'Director';
+  const canCreateProject = user?.role === 'Director' || user?.role === 'Project Head';
+  const canEditProject = user?.role === 'Director' || user?.role === 'Project Head';
   const canDeleteProject = user?.role === 'Director';
 
   const getStatusColor = (status: Project['status']) => {
@@ -149,7 +149,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
               margin: 0
             }}>
               {user?.role === 'Director' ? 'Full access - Create, Edit, Delete' :
-                user?.role === 'Project Head' ? 'View only - No editing permissions' :
+                user?.role === 'Project Head' ? 'Create & Edit access' :
                   'View only - Employee access'}
             </p>
           </div>
@@ -325,7 +325,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                       marginTop: '8px',
                       margin: 0
                     }}>
-                      Only Directors can create new projects
+                      Only Directors and Project Heads can create new projects
                     </p>
                   )}
                 </td>
@@ -429,8 +429,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
                       >
                         <Eye size={16} />
                       </button>
-                      {/* Show Edit button for Directors only */}
-                      {user?.role === 'Director' && (project.id || project._id) && (
+                      {/* Show Edit button for Directors and Project Heads */}
+                      {canEditProject && (project.id || project._id) && (
                         <button
                           onClick={() => handleEditProject(project)}
                           style={{
@@ -455,8 +455,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
                           <Edit size={16} />
                         </button>
                       )}
-                      {/* Show Complete button for Directors only */}
-                      {user?.role === 'Director' && (project.id || project._id) && onProjectComplete && project.status !== 'Completed' && (
+                      {/* Show Complete button for Directors and Project Heads */}
+                      {canEditProject && (project.id || project._id) && onProjectComplete && project.status !== 'Completed' && (
                         <button
                           onClick={() => onProjectComplete(project)}
                           style={{
@@ -484,7 +484,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                         </button>
                       )}
                       {/* Show Delete button for Directors only */}
-                      {user?.role === 'Director' && (project.id || project._id) && (
+                      {canDeleteProject && (project.id || project._id) && (
                         <button
                           onClick={() => handleDeleteProject((project.id || project._id)!)}
                           style={{
@@ -509,8 +509,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
                           <Trash2 size={16} />
                         </button>
                       )}
-                      {/* Show View Only for non-Director users */}
-                      {user?.role !== 'Director' && (
+                      {/* Show View Only for non-Director/Project Head users */}
+                      {!canEditProject && !canDeleteProject && (
                         <span style={{
                           fontSize: '12px',
                           color: '#9ca3af',

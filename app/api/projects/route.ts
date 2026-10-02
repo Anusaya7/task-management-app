@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import Project from '@/models/Project'
 import Task from '@/models/Task'
+import Employee from '@/models/Employee'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -47,9 +48,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Only Director can create projects
-    if (user.role !== 'Director') {
-      return NextResponse.json({ error: 'Forbidden: Only Director can create projects' }, { status: 403 })
+    // Director & Project Head can create projects
+    if (user.role !== 'Director' && user.role !== 'Project Head') {
+      return NextResponse.json({ error: 'Forbidden: Only Director or Project Head can create projects' }, { status: 403 })
     }
 
     await connectToDatabase()
@@ -75,6 +76,14 @@ export async function POST(req: Request) {
       status: status || 'Current',
       projectRemarks: remarks
     })
+
+    // If Project Head created the project, add project ID to Project Head's assignedProjects scope
+    if (user.role === 'Project Head') {
+      const pId = newProject._id.toString()
+      await Employee.findByIdAndUpdate(user._id, {
+        $addToSet: { assignedProjects: pId }
+      })
+    }
 
     return NextResponse.json(newProject, { status: 201 })
   } catch (error: any) {

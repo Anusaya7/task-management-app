@@ -288,7 +288,7 @@ export interface DailyEntry {
   hours: number;
   flagged: boolean;
   flagComment?: string;
-  status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked';
+  status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked' | 'Submitted';
   createdAt?: string;
   updatedAt?: string;
 }

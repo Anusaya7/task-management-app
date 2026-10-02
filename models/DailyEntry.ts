@@ -13,7 +13,7 @@ export interface IDailyEntry extends Document {
   hours: number
   flagged: boolean
   flagComment?: string
-  status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked'
+  status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked' | 'Submitted'
   createdAt: Date
   updatedAt: Date
 }
@@ -33,8 +33,8 @@ const dailyEntrySchema = new Schema<IDailyEntry>({
   flagComment: { type: String },
   status: {
     type: String,
-    enum: ['Pending', 'In Progress', 'Completed', 'Blocked'],
-    default: 'Pending'
+    enum: ['Pending', 'In Progress', 'Completed', 'Blocked', 'Submitted'],
+    default: 'Submitted'
   },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }

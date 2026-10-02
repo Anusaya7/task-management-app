@@ -30,8 +30,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (user.role !== 'Director') {
-      return NextResponse.json({ error: 'Forbidden: Only Director can edit projects' }, { status: 403 })
+    if (user.role !== 'Director' && user.role !== 'Project Head') {
+      return NextResponse.json({ error: 'Forbidden: Only Director or Project Head can edit projects' }, { status: 403 })
     }
 
     await connectToDatabase()

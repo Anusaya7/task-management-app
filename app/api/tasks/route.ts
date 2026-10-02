@@ -118,8 +118,11 @@ export async function POST(req: Request) {
     } else if (user.role === 'Project Head') {
       const allowed = user.assignedEmployees || []
       const requested = Array.isArray(assignedEmployeeIds) ? assignedEmployeeIds : []
-      // Verify requested assignees are within PH scope
-      validAssignees = requested.filter(id => allowed.includes(id) || id === user._id.toString())
+      if (allowed.length > 0) {
+        validAssignees = requested.filter(id => allowed.includes(id) || id === user._id.toString())
+      } else {
+        validAssignees = requested.length > 0 ? requested : [user._id.toString()]
+      }
       if (validAssignees.length === 0) {
         return NextResponse.json({ error: 'Project Head can only assign tasks to allowed employees' }, { status: 403 })
       }

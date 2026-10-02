@@ -30,7 +30,7 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  const { login } = useAuth()
+  const { login, logout } = useAuth()
   const router = useRouter()
 
   const handleRoleSelect = (role: 'Employee' | 'Director' | 'Project Head') => {
@@ -75,6 +75,7 @@ const Login: React.FC = () => {
       if (res.success && res.user) {
         // Role mismatch security check
         if (selectedRole !== 'SELECT' && res.user.role !== selectedRole) {
+          await logout()
           setError(`Role Mismatch: You are attempting to sign in to the ${selectedRole} workspace, but your account is registered as ${res.user.role}. Please switch to the ${res.user.role} workspace.`)
           return
         }

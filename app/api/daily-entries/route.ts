@@ -134,12 +134,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Action Taken is required for all tasks' }, { status: 400 })
       }
       const hrs = Number(item.hours)
-      if (!Number.isFinite(hrs) || hrs < 0.1 || hrs > 8) {
+      if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 8) {
         return NextResponse.json({ error: 'Please enter valid Hours spent (0.1 to 8)' }, { status: 400 })
       }
-      if (item.flagged && (!item.flagComment || !item.flagComment.trim())) {
-        return NextResponse.json({ error: 'Please add a comment for the flagged task' }, { status: 400 })
+      if (item.flagged === undefined || item.flagged === null) {
+        return NextResponse.json({ error: 'Please select Flag before submitting.' }, { status: 400 })
       }
+
       totalSubmittedHours += hrs
     }
 
@@ -201,7 +202,7 @@ export async function POST(req: Request) {
         hours: Number(item.hours),
         flagged: Boolean(item.flagged),
         flagComment: item.flagged ? (item.flagComment ? item.flagComment.trim() : '') : '',
-        status: item.status || 'Completed'
+        status: item.status || 'Submitted'
       })
 
       // Update linked task progress if taskId belongs to a real task

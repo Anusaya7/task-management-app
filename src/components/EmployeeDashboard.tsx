@@ -119,7 +119,7 @@ interface BoardTask {
   actionTaken: string;
   date: string;
   hours: number;
-  flagged: boolean;
+  flagged?: boolean | null;
   flagComment: string;
   workDone: number; // 10-100%
   status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked';
@@ -175,7 +175,7 @@ const EmployeeDashboard: React.FC = () => {
   const [dailyBoard, setDailyBoard] = useState<BoardTask[]>([]);
   
   // Validation Errors state per board item ID
-  const [fieldErrors, setFieldErrors] = useState<Record<string, { actionTaken?: string; hours?: string; flagComment?: string }>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string }>>({});
   const [boardGlobalError, setBoardGlobalError] = useState<string | null>(null);
 
   // Task Removal Confirmation Modal State
@@ -188,6 +188,9 @@ const EmployeeDashboard: React.FC = () => {
   const [reportDateFilter, setReportDateFilter] = useState<string>('');
   const [reportProjectFilter, setReportProjectFilter] = useState<string>('ALL');
   const [reportFlaggedFilter, setReportFlaggedFilter] = useState<string>('ALL');
+
+  // Completed History Sub-Tab
+  const [completedHistorySubTab, setCompletedHistorySubTab] = useState<'daily' | 'tasks'>('daily');
 
   // Reminder & Flag Reply states
   const [reminderReplies, setReminderReplies] = useState<Record<string, string>>({});
@@ -353,7 +356,7 @@ const EmployeeDashboard: React.FC = () => {
       actionTaken: '',
       date: todayDateStr,
       hours: 0,
-      flagged: false,
+      flagged: null as any,
       flagComment: '',
       workDone: 50,
       status: 'In Progress',
@@ -391,7 +394,7 @@ const EmployeeDashboard: React.FC = () => {
       actionTaken: '',
       date: todayDateStr,
       hours: 0,
-      flagged: false,
+      flagged: null as any,
       flagComment: '',
       workDone: 50,
       status: 'In Progress',
@@ -554,7 +557,7 @@ const EmployeeDashboard: React.FC = () => {
       actionTaken: dailyWorkActionTaken.trim(),
       date: todayDateStr,
       hours,
-      flagged: false,
+      flagged: null as any,
       flagComment: '',
       workDone: 0,
       status: 'In Progress',
@@ -594,6 +597,7 @@ const EmployeeDashboard: React.FC = () => {
       const copy = { ...prev };
       if (updates.actionTaken !== undefined) delete copy[boardId]?.actionTaken;
       if (updates.hours !== undefined) delete copy[boardId]?.hours;
+      if (updates.flagged !== undefined) delete copy[boardId]?.flagged;
       if (updates.flagComment !== undefined) delete copy[boardId]?.flagComment;
       return copy;
     });
@@ -610,20 +614,29 @@ const EmployeeDashboard: React.FC = () => {
     }
 
     // Perform complete Page 3 validation
-    const newErrors: Record<string, { actionTaken?: string; hours?: string; flagComment?: string }> = {};
+    const newErrors: Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string }> = {};
     let hasValidationFailure = false;
+    let missingFieldMsg = '';
 
     for (const item of dailyBoard) {
-      const itemErr: { actionTaken?: string; hours?: string; flagComment?: string } = {};
+      const itemErr: { actionTaken?: string; hours?: string; flagged?: string } = {};
 
       if (!item.actionTaken || !item.actionTaken.trim()) {
         itemErr.actionTaken = 'Please enter Action Taken.';
+        if (!missingFieldMsg) missingFieldMsg = 'Please enter Action Taken before submitting.';
         hasValidationFailure = true;
       }
 
       const hrs = Number(item.hours);
-      if (!Number.isFinite(hrs) || hrs < 0.1 || hrs > MAX_DAILY_HOURS) {
+      if (!Number.isFinite(hrs) || hrs <= 0 || hrs > MAX_DAILY_HOURS) {
         itemErr.hours = 'Please enter valid Hours (0.1 to 8).';
+        if (!missingFieldMsg) missingFieldMsg = 'Please enter valid Hours before submitting.';
+        hasValidationFailure = true;
+      }
+
+      if (item.flagged === undefined || item.flagged === null) {
+        itemErr.flagged = 'Please select Flag before submitting.';
+        if (!missingFieldMsg) missingFieldMsg = 'Please select Flag before submitting.';
         hasValidationFailure = true;
       }
 
@@ -633,13 +646,13 @@ const EmployeeDashboard: React.FC = () => {
     }
 
     if (isHoursExceeded) {
-      setBoardGlobalError(`Total daily hours cannot exceed 8 hours. Currently entered: ${allocatedHours.toFixed(1)} hrs (Remaining capacity: 0.0 hrs).`);
+      setBoardGlobalError(`Total daily hours cannot exceed 8 hours. Currently entered: ${allocatedHours.toFixed(1)} hrs.`);
       hasValidationFailure = true;
     }
 
     if (hasValidationFailure) {
       setFieldErrors(newErrors);
-      showToast('error', 'Please complete all required task entries before submitting.');
+      showToast('error', missingFieldMsg || 'Please complete all required fields (Action Taken, Hours, Flag) before submitting.');
       return;
     }
 
@@ -1374,7 +1387,7 @@ const EmployeeDashboard: React.FC = () => {
                         <th className="py-3.5 px-4 w-[8%] bg-emerald-100/70 text-emerald-950 border-r border-emerald-300 text-center">
                           Hours * (Green Entry)
                         </th>
-                        <th className="py-3.5 px-4 w-[5%] text-center">Flag</th>
+                        <th className="py-3.5 px-4 w-[16%] text-center">Flag * (Yes/No)</th>
                         <th className="py-3.5 px-4 text-center rounded-tr-xl">Remove</th>
                       </tr>
                     </thead>
@@ -1454,18 +1467,39 @@ const EmployeeDashboard: React.FC = () => {
                               )}
                             </td>
 
-                            {/* Flag */}
-                            <td className="py-3.5 px-4 align-top">
-                              <div className="flex items-center pt-2">
-                                <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                            {/* Flag (Required Selection Yes / No) */}
+                            <td className="py-3.5 px-4 align-top min-w-[140px]">
+                              <div className="space-y-1">
+                                <select
+                                  value={item.flagged === undefined || item.flagged === null ? '' : (item.flagged ? 'Yes' : 'No')}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === 'Yes') updateBoardItem(item.boardId, { flagged: true });
+                                    else if (val === 'No') updateBoardItem(item.boardId, { flagged: false, flagComment: '' });
+                                    else updateBoardItem(item.boardId, { flagged: null as any });
+                                  }}
+                                  className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-bold transition focus:outline-none ${
+                                    errs?.flagged ? 'bg-rose-50 border-rose-400 text-rose-900 focus:ring-2 focus:ring-rose-500' : 'bg-white border-slate-300 text-slate-800'
+                                  }`}
+                                >
+                                  <option value="">-- Select Flag * --</option>
+                                  <option value="No">No</option>
+                                  <option value="Yes">Yes</option>
+                                </select>
+
+                                {item.flagged && (
                                   <input
-                                    type="checkbox"
-                                    checked={item.flagged}
-                                    onChange={(e) => updateBoardItem(item.boardId, { flagged: e.target.checked })}
-                                    className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500"
+                                    type="text"
+                                    value={item.flagComment || ''}
+                                    onChange={(e) => updateBoardItem(item.boardId, { flagComment: e.target.value })}
+                                    placeholder="Optional flag comment..."
+                                    className="w-full mt-1 px-2.5 py-1 text-[11px] bg-amber-50/80 border border-amber-300 rounded-lg text-amber-950 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
                                   />
-                                  <span>Flag</span>
-                                </label>
+                                )}
+
+                                {errs?.flagged && (
+                                  <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.flagged}</p>
+                                )}
                               </div>
                             </td>
 
@@ -1779,74 +1813,155 @@ const EmployeeDashboard: React.FC = () => {
         {/* TAB 5: COMPLETED HISTORY */}
         {activeTab === 'completed' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-            <div className="border-b border-slate-200 pb-4">
-              <h3 className="text-lg font-black text-[#172554]">Completed Task History</h3>
-              <p className="text-xs text-slate-500">All completed task records for historical reference</p>
+            <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-200 gap-4">
+              <div>
+                <h3 className="text-lg font-black text-[#172554]">Completed History Archive</h3>
+                <p className="text-xs text-slate-500">Submitted daily entry history records and finished tasks</p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCompletedHistorySubTab('daily')}
+                  className={`px-3.5 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ${
+                    completedHistorySubTab === 'daily'
+                      ? 'bg-[#0F172A] text-white border-[#0F172A] shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  Daily Entries ({dailyHistory.length})
+                </button>
+                <button
+                  onClick={() => setCompletedHistorySubTab('tasks')}
+                  className={`px-3.5 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ${
+                    completedHistorySubTab === 'tasks'
+                      ? 'bg-[#0F172A] text-white border-[#0F172A] shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  Completed Tasks ({tasks.filter(t => t.status === 'Completed').length})
+                </button>
+              </div>
             </div>
 
-            {tasks.filter(t => t.status === 'Completed').length === 0 ? (
-              <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <CheckCircle2 size={36} className="mx-auto text-slate-300 mb-2" />
-                <p className="text-sm font-bold text-slate-700">No completed task history available.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-700 font-extrabold uppercase border-b border-slate-200">
-                      <th className="py-3.5 px-4">Project Name</th>
-                      <th className="py-3.5 px-4">Task Title</th>
-                      <th className="py-3.5 px-4">Employee Name</th>
-                      <th className="py-3.5 px-4">Completion Date</th>
-                      <th className="py-3.5 px-4 text-center">Completion Status</th>
-                      <th className="py-3.5 px-4 text-center">Work Done %</th>
-                      <th className="py-3.5 px-4 text-center">Time Spent</th>
-                      <th className="py-3.5 px-4">Action Taken</th>
-                      <th className="py-3.5 px-4">Role Remarks</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 font-medium">
-                    {tasks
-                      .filter(t => t.status === 'Completed')
-                      .map(t => {
-                        const taskIdStr = t.id || t._id;
-                        const taskEntries = dailyHistory.filter(e => e.taskId === taskIdStr);
-                        const hoursWorked = taskEntries.reduce((acc, e) => acc + (Number(e.hours) || 0), 0);
-                        const actionTaken = taskEntries.length > 0 ? taskEntries[0].actionTaken : (t.description || '-');
-                        const compDate = t.approvalDate
-                          ? new Date(t.approvalDate).toLocaleDateString('en-IN')
-                          : (t.updatedAt ? new Date(t.updatedAt).toLocaleDateString('en-IN') : todayDateStr);
-
-                        return (
-                          <tr key={taskIdStr} className="hover:bg-slate-50 transition">
-                            <td className="py-3.5 px-4 font-bold text-slate-900">{t.projectName}</td>
-                            <td className="py-3.5 px-4 font-bold text-indigo-700">{t.title}</td>
-                            <td className="py-3.5 px-4 text-slate-600">{user?.name}</td>
-                            <td className="py-3.5 px-4 text-slate-600">{compDate}</td>
-                            <td className="py-3.5 px-4 text-center">
-                              <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
-                                Completed
+            {completedHistorySubTab === 'daily' && (
+              dailyHistory.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <CheckCircle2 size={36} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No daily entry history available.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-extrabold uppercase border-b border-slate-200">
+                        <th className="py-3 px-4">Date</th>
+                        <th className="py-3 px-4">Project</th>
+                        <th className="py-3 px-4">Task</th>
+                        <th className="py-3 px-4">Action Taken</th>
+                        <th className="py-3 px-4 text-center">Hours</th>
+                        <th className="py-3 px-4 text-center">Flag</th>
+                        <th className="py-3 px-4">Flag Comment</th>
+                        <th className="py-3 px-4 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {dailyHistory.map((entry, index) => (
+                        <tr key={entry.id || entry._id || `comp-dh-${index}`} className="hover:bg-slate-50 transition">
+                          <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{entry.date}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-700">{entry.projectName}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900">{entry.taskTitle}</td>
+                          <td className="py-3 px-4 text-slate-600 max-w-xs">{entry.actionTaken}</td>
+                          <td className="py-3 px-4 text-center font-black text-indigo-600 whitespace-nowrap">{entry.hours} hrs</td>
+                          <td className="py-3 px-4 text-center">
+                            {entry.flagged ? (
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-rose-100 text-rose-800 border border-rose-300">
+                                Yes
                               </span>
-                            </td>
-                            <td className="py-3.5 px-4 text-center font-black text-emerald-600">
-                              100%
-                            </td>
-                            <td className="py-3.5 px-4 text-center font-black text-indigo-600 whitespace-nowrap">
-                              {hoursWorked > 0 ? formatHoursMinutes(hoursWorked) : '-'}
-                            </td>
-                            <td className="py-3.5 px-4 text-slate-700">{actionTaken}</td>
-                            <td className="py-3.5 px-4 text-slate-600 space-y-1">
-                              <div><span className="font-bold text-slate-700">Employee Remark:</span> {t.employeeRemark || actionTaken || 'None'}</div>
-                              <div><span className="font-bold text-slate-700">Director Remark:</span> {t.directorRemark || t.approvalRemarks || 'None'}</div>
-                              <div><span className="font-bold text-slate-700">Project Head Remark:</span> {t.projectHeadRemark || 'None'}</div>
-                              <div><span className="font-bold text-slate-700">Status:</span> <span className="font-bold text-emerald-700">{t.status}</span></div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
+                            ) : (
+                              <span className="text-slate-400 font-medium">No</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-slate-600 italic">
+                            {entry.flagComment || '—'}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              {entry.status || 'Submitted'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+
+            {completedHistorySubTab === 'tasks' && (
+              tasks.filter(t => t.status === 'Completed').length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <CheckCircle2 size={36} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No completed task history available.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-extrabold uppercase border-b border-slate-200">
+                        <th className="py-3.5 px-4">Project Name</th>
+                        <th className="py-3.5 px-4">Task Title</th>
+                        <th className="py-3.5 px-4">Employee Name</th>
+                        <th className="py-3.5 px-4">Completion Date</th>
+                        <th className="py-3.5 px-4 text-center">Completion Status</th>
+                        <th className="py-3.5 px-4 text-center">Work Done %</th>
+                        <th className="py-3.5 px-4 text-center">Time Spent</th>
+                        <th className="py-3.5 px-4">Action Taken</th>
+                        <th className="py-3.5 px-4">Role Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 font-medium">
+                      {tasks
+                        .filter(t => t.status === 'Completed')
+                        .map(t => {
+                          const taskIdStr = t.id || t._id;
+                          const taskEntries = dailyHistory.filter(e => e.taskId === taskIdStr);
+                          const hoursWorked = taskEntries.reduce((acc, e) => acc + (Number(e.hours) || 0), 0);
+                          const actionTaken = taskEntries.length > 0 ? taskEntries[0].actionTaken : (t.description || '-');
+                          const compDate = t.approvalDate
+                            ? new Date(t.approvalDate).toLocaleDateString('en-IN')
+                            : (t.updatedAt ? new Date(t.updatedAt).toLocaleDateString('en-IN') : todayDateStr);
+
+                          return (
+                            <tr key={taskIdStr} className="hover:bg-slate-50 transition">
+                              <td className="py-3.5 px-4 font-bold text-slate-900">{t.projectName}</td>
+                              <td className="py-3.5 px-4 font-bold text-indigo-700">{t.title}</td>
+                              <td className="py-3.5 px-4 text-slate-600">{user?.name}</td>
+                              <td className="py-3.5 px-4 text-slate-600">{compDate}</td>
+                              <td className="py-3.5 px-4 text-center">
+                                <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
+                                  Completed
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-center font-black text-emerald-600">
+                                100%
+                              </td>
+                              <td className="py-3.5 px-4 text-center font-black text-indigo-600 whitespace-nowrap">
+                                {hoursWorked > 0 ? formatHoursMinutes(hoursWorked) : '-'}
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-700">{actionTaken}</td>
+                              <td className="py-3.5 px-4 text-slate-600 space-y-1">
+                                <div><span className="font-bold text-slate-700">Employee Remark:</span> {t.employeeRemark || actionTaken || 'None'}</div>
+                                <div><span className="font-bold text-slate-700">Director Remark:</span> {t.directorRemark || t.approvalRemarks || 'None'}</div>
+                                <div><span className="font-bold text-slate-700">Project Head Remark:</span> {t.projectHeadRemark || 'None'}</div>
+                                <div><span className="font-bold text-slate-700">Status:</span> <span className="font-bold text-emerald-700">{t.status}</span></div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )
             )}
           </div>
         )}
