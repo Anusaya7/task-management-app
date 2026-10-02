@@ -1,6 +1,10 @@
 import mongoose from 'mongoose'
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://ghodehimanshu453:6YeUjmeewSV9zpM5@cluster0.uo4qa7m.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+const MONGODB_URI = process.env.MONGODB_URI
+
+if (!MONGODB_URI) {
+  throw new Error('Please define the MONGODB_URI environment variable inside .env.local (or in Vercel project settings)')
+}
 
 /**
  * Global is used here to maintain a cached connection across hot reloads
