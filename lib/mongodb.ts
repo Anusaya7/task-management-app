@@ -13,7 +13,6 @@ const MONGODB_URI: string = process.env.MONGODB_URI
  */
 declare global {
   var mongoose: any
-  var mongoMemoryServer: any
 }
 
 let cached = global.mongoose
@@ -34,39 +33,13 @@ async function dbConnect() {
   if (!cached.promise) {
     const opts = {
       bufferCommands: false,
-      serverSelectionTimeoutMS: (process.env.VERCEL || process.env.NODE_ENV === 'production') ? 10000 : 2000,
+      serverSelectionTimeoutMS: 15000,
     }
 
     cached.promise = mongoose.connect(MONGODB_URI, opts)
       .then((mongoose) => {
-        console.log('✅ Connected to Primary MongoDB')
+        console.log('Connected to MongoDB')
         return mongoose
-      })
-      .catch(async (err) => {
-        console.warn('⚠️ Could not connect to primary MONGODB_URI:', err.message)
-        cached.promise = null
-        
-        // MongoMemoryServer fallback only in local development (not on Vercel/production)
-        if (process.env.NODE_ENV === 'development' && !process.env.VERCEL) {
-          console.log('🔄 Launching In-Memory MongoDB Server fallback...')
-          try {
-            const { MongoMemoryServer } = eval('require')('mongodb-memory-server')
-            if (!global.mongoMemoryServer) {
-              global.mongoMemoryServer = await MongoMemoryServer.create()
-            }
-            const memoryUri = global.mongoMemoryServer.getUri()
-            console.log('✅ Connected to In-Memory MongoDB:', memoryUri)
-            if (mongoose.connection.readyState !== 0) {
-              await mongoose.disconnect()
-            }
-            const conn = await mongoose.connect(memoryUri, { bufferCommands: false })
-            return conn
-          } catch (memErr: any) {
-            console.error('❌ Failed to launch MongoMemoryServer:', memErr.message)
-            throw err
-          }
-        }
-        throw err
       })
   }
 
@@ -81,4 +54,3 @@ async function dbConnect() {
 }
 
 export default dbConnect
-

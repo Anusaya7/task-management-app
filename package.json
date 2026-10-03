@@ -24,7 +24,7 @@
     "xlsx": "^0.18.5"
   },
   "scripts": {
-    "dev": "node --max-old-space-size=4096 node_modules/next/dist/bin/next dev",
+    "dev": "node scripts/dev.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

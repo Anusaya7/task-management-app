@@ -94,7 +94,11 @@ export async function POST(req: Request) {
     console.error('Login API error:', error)
     const errorMsg = error?.message || 'Internal server error'
     if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('Mongo') || errorMsg.includes('connect')) {
-      return NextResponse.json({ error: 'Database connection error. Please verify MONGODB_URI in Vercel Production Environment Variables.' }, { status: 500 })
+      return NextResponse.json({
+        error: process.env.VERCEL
+          ? 'Database connection error. Please verify MONGODB_URI in Vercel Production Environment Variables.'
+          : 'Database connection error. Please verify MONGODB_URI in .env.local.'
+      }, { status: 500 })
     }
     return NextResponse.json({ error: errorMsg }, { status: 500 })
   }

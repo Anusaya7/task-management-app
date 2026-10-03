@@ -9,6 +9,9 @@ yarn-error.log*
 out/
 build/
 
+# Local MongoDB data (development fallback)
+.mongo-data/
+
 # Environment variables
 .env
 .env.local
