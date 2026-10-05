@@ -69,11 +69,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setUser(null);
           setToken(null);
           if (typeof window !== 'undefined') localStorage.removeItem('user');
+          setLoading(false);
           return;
         }
 
-        if (cachedUser) setUser(cachedUser);
-        setToken(savedToken);
+        if (cachedUser) {
+          setUser(cachedUser);
+          setToken(savedToken);
+          setLoading(false);
+        } else {
+          setToken(savedToken);
+        }
 
         controller = new AbortController();
         timeoutId = setTimeout(() => controller?.abort(), AUTH_CHECK_TIMEOUT_MS);
@@ -121,6 +127,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     void checkAuth();
+    const failSafe = setTimeout(() => setLoading(false), AUTH_CHECK_TIMEOUT_MS + 500);
+    return () => clearTimeout(failSafe);
   }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> => {

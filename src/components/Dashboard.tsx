@@ -23,13 +23,13 @@ import NotificationCenter from './NotificationCenter';
 import DirectorProfile from './DirectorProfile';
 import {
   PriorityBadge,
-  ProjectStatusBadge,
   EmployeeStatusBadge,
   EmployeeAvatar,
   SkeletonCard,
   SkeletonTable,
   formatHoursMinutes
 } from './BadgeUtils';
+import { isOngoingProjectStatus } from '@/lib/projectStatus';
 import {
   FolderOpen,
   CheckSquare,
@@ -212,7 +212,7 @@ const Dashboard: React.FC = () => {
   // 10 EXACT SUMMARY CARDS
   const stats = {
     totalProjects: projects.length,
-    activeProjects: projects.filter(p => p.status === 'Current').length,
+    activeProjects: projects.filter(p => isOngoingProjectStatus(p.status)).length,
     upcomingProjects: projects.filter(p => p.status === 'Upcoming').length,
     sleepingProjects: projects.filter(p => p.status === 'Sleeping (On Hold)').length,
     completedProjects: projects.filter(p => p.status === 'Completed').length,
@@ -225,8 +225,12 @@ const Dashboard: React.FC = () => {
 
   // ACTION REQUIRED CATEGORIES
   const openFlagsList = flags.filter(f => f.status === 'Open');
-  const pendingApprovalTasks = tasks.filter(t => t.status === 'Pending Approval' || (t.workDone === 100 && t.status !== 'Completed'));
-  const unrepliedRemindersList = reminders.filter(r => r.status === 'Not Replied' || (r.reminderDate && r.reminderDate < todayDateStr && r.status !== 'Replied'));
+  const pendingApprovalTasks = tasks.filter(t =>
+    t.status === 'Pending Approval' ||
+    (t.workDone === 100 && t.status !== 'Completed') ||
+    (t.assigneeProgress || []).some(item => item.status === 'Pending Approval' || item.workDone >= 100) && t.status !== 'Completed'
+  );
+  const unrepliedRemindersList = reminders.filter(r => !['Replied', 'Closed', 'Completed'].includes(r.status));
   const overdueTasksList = tasks.filter(t => Boolean(t.dueDate && t.dueDate < todayDateStr && t.status !== 'Completed'));
   const submittedDailyWorkToday = dailyEntries.filter(d => d.date === todayDateStr);
   const updatePendingTasksList = tasks.filter(t => ['Not Updated', 'Revision Required', 'Not Replied'].includes(t.status));
@@ -306,6 +310,25 @@ const Dashboard: React.FC = () => {
 
       showToast('success', 'Flag resolved successfully.');
       fetchData();
+    } catch (err) {
+      showToast('error', 'Network error.');
+    }
+  };
+
+  const handleCloseReminder = async (reminderId: string) => {
+    try {
+      const res = await fetch(`/api/reminders/${reminderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Closed' })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        showToast('error', data.error || 'Failed to close reminder');
+        return;
+      }
+      showToast('success', 'Reminder marked as closed.');
+      fetchData(false);
     } catch (err) {
       showToast('error', 'Network error.');
     }
@@ -435,7 +458,7 @@ const Dashboard: React.FC = () => {
         throw new Error(data.error || 'Failed to save task');
       }
 
-      showToast('success', isEdit ? 'Task updated.' : 'Task created.');
+      showToast('success', isEdit ? 'Task updated.' : 'Task assigned successfully.');
       fetchData();
     } catch (err: any) {
       throw err;
@@ -478,7 +501,13 @@ const Dashboard: React.FC = () => {
 
   // Filtered views
   const filteredProjects = projects.filter(p => {
-    if (projectStatusFilter !== 'all' && p.status !== projectStatusFilter) return false;
+    if (projectStatusFilter !== 'all') {
+      if (projectStatusFilter === 'Ongoing') {
+        if (!isOngoingProjectStatus(p.status)) return false
+      } else if (p.status !== projectStatusFilter) {
+        return false
+      }
+    }
     return true;
   });
 
@@ -799,19 +828,19 @@ const Dashboard: React.FC = () => {
                   <p className="text-[11px] text-[#94A3B8] mt-0.5">Registered projects</p>
                 </button>
 
-                {/* 2. Active Projects */}
+                {/* 2. Ongoing Projects */}
                 <button
-                  onClick={() => { setActiveTab('projects'); setProjectStatusFilter('Current'); }}
+                  onClick={() => { setActiveTab('projects'); setProjectStatusFilter('Ongoing'); }}
                   className="text-left bg-white p-5 rounded-[14px] border border-[#E2E8F0] shadow-xs hover:border-[#2563EB] hover:shadow-md transition cursor-pointer group"
                 >
                   <div className="flex items-center justify-between text-[#64748B] mb-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB]">Active Projects</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB]">Ongoing</span>
                     <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2563EB] flex items-center justify-center group-hover:bg-[#2563EB] group-hover:text-white transition">
                       <Layers size={16} />
                     </div>
                   </div>
                   <p className="text-2xl font-extrabold text-[#2563EB]">{stats.activeProjects}</p>
-                  <p className="text-[11px] text-[#94A3B8] mt-0.5">Active execution</p>
+                  <p className="text-[11px] text-[#94A3B8] mt-0.5">Ongoing projects</p>
                 </button>
 
                 {/* 3. Upcoming Projects */}
@@ -1209,7 +1238,7 @@ const Dashboard: React.FC = () => {
             {/* Total Hours Banner */}
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between text-xs text-indigo-950 font-bold">
               <span>Total Entries Found: {filteredDailyReports.length}</span>
-              <span>Calculated Total Hours: <span className="text-indigo-600 text-sm font-black">{reportTotalHours.toFixed(1)} Hours</span></span>
+              <span>Calculated Total Hours: <span className="text-indigo-600 text-sm font-black">{formatHoursMinutes(reportTotalHours)}</span></span>
             </div>
 
             {filteredDailyReports.length === 0 ? (
@@ -1241,7 +1270,7 @@ const Dashboard: React.FC = () => {
                         <td className="p-3.5 font-bold text-[#0F172A]">{entry.taskTitle}</td>
                         <td className="p-3.5 text-[#64748B]">{entry.details || '-'}</td>
                         <td className="p-3.5 text-[#0F172A]">{entry.actionTaken}</td>
-                        <td className="p-3.5 text-center font-extrabold text-[#2563EB]">{entry.hours} hrs</td>
+                        <td className="p-3.5 text-center font-extrabold text-[#2563EB]">{formatHoursMinutes(entry.hours)}</td>
                         <td className="p-3.5 text-center font-semibold text-[#64748B] whitespace-nowrap">{entry.date}</td>
                         <td className="p-3.5 text-center">
                           {entry.flagged ? (
@@ -1398,6 +1427,7 @@ const Dashboard: React.FC = () => {
                       <th className="p-3.5">Reminder Date</th>
                       <th className="p-3.5">Response Status</th>
                       <th className="p-3.5">Response / Comment</th>
+                      <th className="p-3.5 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E2E8F0]">
@@ -1419,6 +1449,18 @@ const Dashboard: React.FC = () => {
                           </td>
                           <td className="p-3.5 text-[#475569] italic">
                             {rem.response ? `"${rem.response}"` : <span className="text-[#94A3B8]">No response recorded</span>}
+                          </td>
+                          <td className="p-3.5 text-right">
+                            {['Closed', 'Completed'].includes(rem.status) ? (
+                              <span className="text-[11px] font-bold text-emerald-700">Closed</span>
+                            ) : (
+                              <button
+                                onClick={() => handleCloseReminder(remId)}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-lg border border-emerald-200 transition cursor-pointer"
+                              >
+                                Mark Closed
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1475,7 +1517,9 @@ const Dashboard: React.FC = () => {
                               <h4 className="font-bold text-[#0F172A] text-sm">{flag.taskTitle}</h4>
                             </div>
                             <p className="text-xs text-[#64748B]">
-                              Raised by <span className="font-semibold text-[#334155]">{flag.employeeName}</span> on {flag.flagDate}
+                              Raised by <span className="font-semibold text-[#334155]">{flag.createdByName || flag.employeeName}</span>
+                              {flag.concernedPersonName ? <> → <span className="font-semibold text-[#334155]">{flag.concernedPersonName}</span></> : null}
+                              {' '}on {flag.flagDate}
                             </p>
                           </div>
                           <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full ${
@@ -1649,8 +1693,10 @@ const Dashboard: React.FC = () => {
                     <th className="p-3.5">Project</th>
                     <th className="p-3.5">Priority</th>
                     <th className="p-3.5">Assigned Staff</th>
+                    <th className="p-3.5">Individual Status</th>
                     <th className="p-3.5">Work %</th>
                     <th className="p-3.5">Status</th>
+                    <th className="p-3.5">Reminder</th>
                     {isDirector && <th className="p-3.5">Director Star</th>}
                     <th className="p-3.5 text-right">Actions</th>
                   </tr>
@@ -1671,6 +1717,31 @@ const Dashboard: React.FC = () => {
                             <span className="font-semibold text-[#334155]">{t.assignedEmployeeNames?.join(', ') || '-'}</span>
                           </div>
                         </td>
+                        <td className="p-3.5">
+                          <div className="space-y-1">
+                            {(t.assigneeProgress && t.assigneeProgress.length > 0
+                              ? t.assigneeProgress
+                              : (t.assignedEmployeeNames || []).map((name, index) => ({
+                                  employeeId: t.assignedEmployeeIds?.[index] || `${index}`,
+                                  employeeName: name,
+                                  status: t.status,
+                                  workDone: t.workDone || 0
+                                }))
+                            ).map(item => (
+                              <div key={item.employeeId} className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-semibold text-[#334155]">{item.employeeName || 'Employee'}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  item.status === 'Completed' ? 'bg-[#F0FDF4] text-[#16A34A]' :
+                                  item.status === 'Pending Approval' ? 'bg-[#FFFBEB] text-[#D97706]' :
+                                  item.status === 'In Progress' ? 'bg-[#EFF6FF] text-[#2563EB]' :
+                                  'bg-[#F8FAFC] text-[#64748B]'
+                                }`}>
+                                  {item.status} {item.workDone ? `(${item.workDone}%)` : ''}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
                         <td className="p-3.5 font-extrabold text-[#2563EB]">{t.workDone || 0}%</td>
                         <td className="p-3.5">
                           <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
@@ -1681,6 +1752,7 @@ const Dashboard: React.FC = () => {
                             {t.status}
                           </span>
                         </td>
+                        <td className="p-3.5 text-[#64748B] font-medium whitespace-nowrap">{t.reminderDate || t.dueDate || '-'}</td>
                         {isDirector && (
                           <td className="p-3.5">
                             {t.rating ? (
@@ -1816,6 +1888,7 @@ const Dashboard: React.FC = () => {
           employees={employees}
           onClose={() => setIsTaskModalOpen(false)}
           onSave={handleSaveTask}
+          dataLoading={loading}
         />
 
         {/* Employee Modal */}

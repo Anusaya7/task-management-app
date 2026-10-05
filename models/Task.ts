@@ -11,6 +11,13 @@ export interface ITask extends Document {
   assignedByName?: string
   assignedEmployeeIds: string[]
   assignedEmployeeNames?: string[]
+  assigneeProgress?: Array<{
+    employeeId: string
+    employeeName?: string
+    status: 'Pending' | 'In Progress' | 'Pending Approval' | 'Completed' | 'Carried Forward' | 'Reassigned' | 'Not Updated' | 'Not Replied' | 'Revision Required'
+    workDone: number
+    lastSubmittedAt?: Date
+  }>
   projectHeadId?: string
   workDone: number
   reminderDate?: string
@@ -61,6 +68,27 @@ const taskSchema = new Schema<ITask>({
   assignedByName: { type: String },
   assignedEmployeeIds: [{ type: String, required: true }],
   assignedEmployeeNames: [{ type: String }],
+  assigneeProgress: [{
+    employeeId: { type: String, required: true },
+    employeeName: { type: String },
+    status: {
+      type: String,
+      enum: [
+        'Pending',
+        'In Progress',
+        'Pending Approval',
+        'Completed',
+        'Carried Forward',
+        'Reassigned',
+        'Not Updated',
+        'Not Replied',
+        'Revision Required'
+      ],
+      default: 'Pending'
+    },
+    workDone: { type: Number, min: 0, max: 100, default: 0 },
+    lastSubmittedAt: { type: Date }
+  }],
   projectHeadId: { type: String },
   workDone: { type: Number, min: 0, max: 100, default: 0 },
   reminderDate: { type: String },

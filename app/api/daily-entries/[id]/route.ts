@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import DailyEntry from '@/models/DailyEntry'
 import { getAuthUser } from '@/lib/auth'
+import { parseTimeInput } from '@/lib/timeFormat'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,7 +75,13 @@ export async function PUT(
     if (body.taskTitle !== undefined && body.taskTitle.trim() !== '') entry.taskTitle = body.taskTitle.trim()
     if (body.details !== undefined && body.details.trim() !== '') entry.details = body.details.trim()
     if (body.actionTaken !== undefined) entry.actionTaken = body.actionTaken.trim()
-    if (body.hours !== undefined) entry.hours = Number(body.hours)
+    if (body.hours !== undefined) {
+      const parsedHours = parseTimeInput(body.hours)
+      if (!parsedHours.ok) {
+        return NextResponse.json({ error: parsedHours.error }, { status: 400 })
+      }
+      entry.hours = parsedHours.hours
+    }
     if (body.flagged !== undefined) entry.flagged = Boolean(body.flagged)
     if (body.flagComment !== undefined) entry.flagComment = body.flagComment.trim()
     if (body.status !== undefined) entry.status = body.status

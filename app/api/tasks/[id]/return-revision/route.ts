@@ -12,14 +12,25 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (user.role !== 'Director') {
-      return NextResponse.json({ error: 'Forbidden: Only Directors can return tasks for revision' }, { status: 403 })
+    if (user.role !== 'Director' && user.role !== 'Project Head') {
+      return NextResponse.json({ error: 'Forbidden: Only Director or Project Head can return tasks for revision' }, { status: 403 })
     }
 
     await connectToDatabase()
     const task = await Task.findById(params.id)
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    }
+
+    if (user.role === 'Project Head') {
+      const allowedEmps = user.assignedEmployees || []
+      const allowedProjs = user.assignedProjects || []
+      const isAllowed = (task.assignedEmployeeIds || []).some((id: string) => allowedEmps.includes(id)) ||
+                        allowedProjs.includes(task.projectId) ||
+                        task.projectHeadId === user._id.toString()
+      if (!isAllowed) {
+        return NextResponse.json({ error: 'Forbidden: Task outside assigned scope' }, { status: 403 })
+      }
     }
 
     const { remark } = await req.json()

@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Project, Task, Reminder, Flag, TaskPriority, EmployeePerformance, DailyEntry } from '../types';
 import Sidebar, { TabType } from './Sidebar';
 import { formatHoursMinutes } from './BadgeUtils';
+import { hoursToHHMM, parseTimeInput, MAX_DAILY_HOURS } from '@/lib/timeFormat';
 import TaskModal from './TaskModal';
 import NotificationCenter from './NotificationCenter';
 import EmployeeProfile from './EmployeeProfile';
@@ -37,8 +38,6 @@ import {
   Edit3,
   Sparkles
 } from 'lucide-react';
-
-const MAX_DAILY_HOURS = 8;
 
 type CategoryType = 'URGENT' | 'LESS_URGENT' | 'LOW_URGENT' | 'SELF_DEFINED' | 'DAILY_TASK';
 
@@ -119,8 +118,11 @@ interface BoardTask {
   actionTaken: string;
   date: string;
   hours: number;
+  hoursInput?: string;
   flagged?: boolean | null;
   flagComment: string;
+  concernedPersonId: string;
+  concernedPersonName: string;
   workDone: number; // 10-100%
   status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked';
   urgency: 'URGENT' | 'LESS URGENT' | 'LOW URGENT' | 'SELF DEFINED' | 'DAILY TASK';
@@ -168,7 +170,7 @@ const EmployeeDashboard: React.FC = () => {
   const [dailyWorkTask, setDailyWorkTask] = useState<string>('');
   const [dailyWorkDescription, setDailyWorkDescription] = useState<string>('');
   const [dailyWorkActionTaken, setDailyWorkActionTaken] = useState<string>('');
-  const [dailyWorkHours, setDailyWorkHours] = useState<number>(1);
+  const [dailyWorkHours, setDailyWorkHours] = useState<string>('01:00');
   const [dailyWorkError, setDailyWorkError] = useState<string>('');
 
   // Daily Entry Task Board State
@@ -358,6 +360,8 @@ const EmployeeDashboard: React.FC = () => {
       hours: 0,
       flagged: null as any,
       flagComment: '',
+      concernedPersonId: '',
+      concernedPersonName: '',
       workDone: 50,
       status: 'In Progress',
       urgency: taskItem.urgency || 'SELF DEFINED'
@@ -396,6 +400,8 @@ const EmployeeDashboard: React.FC = () => {
       hours: 0,
       flagged: null as any,
       flagComment: '',
+      concernedPersonId: '',
+      concernedPersonName: '',
       workDone: 50,
       status: 'In Progress',
       urgency: urgencyLabelMap[taskItem.category]
@@ -526,11 +532,12 @@ const EmployeeDashboard: React.FC = () => {
       return;
     }
 
-    const hours = Number(dailyWorkHours);
-    if (!Number.isFinite(hours) || hours < 0.1 || hours > MAX_DAILY_HOURS) {
-      setDailyWorkError('Please enter valid Hours (0.1 to 8).');
+    const parsedHours = parseTimeInput(dailyWorkHours);
+    if (!parsedHours.ok) {
+      setDailyWorkError(parsedHours.error);
       return;
     }
+    const hours = parsedHours.hours;
 
     const taskTitle = dailyWorkTask.trim();
     const alreadyExists = dailyBoard.some(item =>
@@ -559,6 +566,8 @@ const EmployeeDashboard: React.FC = () => {
       hours,
       flagged: null as any,
       flagComment: '',
+      concernedPersonId: '',
+      concernedPersonName: '',
       workDone: 0,
       status: 'In Progress',
       urgency: 'SELF DEFINED'
@@ -570,7 +579,7 @@ const EmployeeDashboard: React.FC = () => {
     setDailyWorkTask('');
     setDailyWorkDescription('');
     setDailyWorkActionTaken('');
-    setDailyWorkHours(1);
+    setDailyWorkHours('01:00');
     setIsDailyWorkModalOpen(false);
   };
 
@@ -579,7 +588,7 @@ const EmployeeDashboard: React.FC = () => {
   const savedTodayHours = todayEntries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
   const allocatedHours = savedTodayHours + dailyBoard.reduce((sum, item) => sum + (Number(item.hours) || 0), 0);
   const freeHours = Math.max(0, MAX_DAILY_HOURS - allocatedHours);
-  const isHoursExceeded = allocatedHours > MAX_DAILY_HOURS;
+  const overtimeHours = Math.max(0, allocatedHours - MAX_DAILY_HOURS);
   const progressPercent = Math.min(100, Math.round((allocatedHours / MAX_DAILY_HOURS) * 100));
 
   // Daily Board Form Field Changes
@@ -619,7 +628,7 @@ const EmployeeDashboard: React.FC = () => {
     let missingFieldMsg = '';
 
     for (const item of dailyBoard) {
-      const itemErr: { actionTaken?: string; hours?: string; flagged?: string } = {};
+      const itemErr: { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string } = {};
 
       if (!item.actionTaken || !item.actionTaken.trim()) {
         itemErr.actionTaken = 'Please enter Action Taken.';
@@ -627,11 +636,16 @@ const EmployeeDashboard: React.FC = () => {
         hasValidationFailure = true;
       }
 
-      const hrs = Number(item.hours);
-      if (!Number.isFinite(hrs) || hrs <= 0 || hrs > MAX_DAILY_HOURS) {
-        itemErr.hours = 'Please enter valid Hours (0.1 to 8).';
-        if (!missingFieldMsg) missingFieldMsg = 'Please enter valid Hours before submitting.';
+      const hoursSource = item.hoursInput !== undefined ? item.hoursInput : item.hours;
+      const parsedHours = parseTimeInput(hoursSource);
+      if (!parsedHours.ok) {
+        itemErr.hours = hoursSource === '' || hoursSource === undefined || hoursSource === 0
+          ? 'Please enter Hours before submitting.'
+          : parsedHours.error;
+        if (!missingFieldMsg) missingFieldMsg = itemErr.hours;
         hasValidationFailure = true;
+      } else {
+        item.hours = parsedHours.hours;
       }
 
       if (item.flagged === undefined || item.flagged === null) {
@@ -643,11 +657,6 @@ const EmployeeDashboard: React.FC = () => {
       if (Object.keys(itemErr).length > 0) {
         newErrors[item.boardId] = itemErr;
       }
-    }
-
-    if (isHoursExceeded) {
-      setBoardGlobalError(`Total daily hours cannot exceed 8 hours. Currently entered: ${allocatedHours.toFixed(1)} hrs.`);
-      hasValidationFailure = true;
     }
 
     if (hasValidationFailure) {
@@ -673,6 +682,8 @@ const EmployeeDashboard: React.FC = () => {
           hours: b.hours,
           flagged: b.flagged,
           flagComment: b.flagComment,
+          concernedPersonId: b.concernedPersonId,
+          concernedPersonName: b.concernedPersonName,
           workDone: b.workDone,
           status: b.status
         })))
@@ -720,6 +731,29 @@ const EmployeeDashboard: React.FC = () => {
       showToast('success', 'Reminder reply submitted.');
       setReminderReplies(prev => ({ ...prev, [reminderId]: '' }));
       fetchData();
+    } catch (err) {
+      showToast('error', 'Network error.');
+    }
+  };
+
+  const handleCloseReminder = async (reminderId: string) => {
+    try {
+      const res = await fetch(`/api/reminders/${reminderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'Closed',
+          response: reminderReplies[reminderId] || undefined
+        })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        showToast('error', data.error || 'Failed to close reminder');
+        return;
+      }
+      showToast('success', 'Reminder marked as closed.');
+      setReminderReplies(prev => ({ ...prev, [reminderId]: '' }));
+      fetchData(false);
     } catch (err) {
       showToast('error', 'Network error.');
     }
@@ -1323,7 +1357,10 @@ const EmployeeDashboard: React.FC = () => {
                     <span>+ Add Daily Work</span>
                   </button>
                   <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700">
-                    Today&apos;s Hours: <span className={isHoursExceeded ? 'text-rose-600 font-black' : 'text-indigo-600 font-extrabold'}>{formatHoursMinutes(allocatedHours)}</span> / 8 Hours
+                    Today&apos;s Hours: <span className="text-indigo-600 font-extrabold">{formatHoursMinutes(allocatedHours)}</span> / 08:00
+                    {overtimeHours > 0 && (
+                      <span className="ml-2 text-amber-700">Extra {formatHoursMinutes(overtimeHours)}</span>
+                    )}
                   </div>
                   <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-xl text-xs font-bold text-blue-900 shadow-xs">
                     Free Time: <span className="font-black text-blue-700">{formatHoursMinutes(freeHours)}</span>
@@ -1387,6 +1424,7 @@ const EmployeeDashboard: React.FC = () => {
                         <th className="py-3.5 px-4 w-[8%] bg-emerald-100/70 text-emerald-950 border-r border-emerald-300 text-center">
                           Hours * (Green Entry)
                         </th>
+                        <th className="py-3.5 px-4 w-[8%] text-center">Progress %</th>
                         <th className="py-3.5 px-4 w-[16%] text-center">Flag * (Yes/No)</th>
                         <th className="py-3.5 px-4 text-center rounded-tr-xl">Remove</th>
                       </tr>
@@ -1449,15 +1487,20 @@ const EmployeeDashboard: React.FC = () => {
                             {/* Hours (Green Required Field) */}
                             <td className="py-3.5 px-4 bg-emerald-50/40 border-r border-emerald-200 align-top w-28">
                               <input
-                                type="number"
-                                step="0.5"
-                                min="0.1"
-                                max="8"
-                                value={item.hours || ''}
-                                onChange={(e) => updateBoardItem(item.boardId, { hours: parseFloat(e.target.value) || 0 })}
-                                placeholder="Hrs"
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="HH:MM"
+                                value={item.hoursInput !== undefined ? item.hoursInput : (item.hours ? hoursToHHMM(item.hours) : '')}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const parsed = parseTimeInput(val);
+                                  updateBoardItem(item.boardId, {
+                                    hours: parsed.ok ? parsed.hours : 0,
+                                    hoursInput: val
+                                  });
+                                }}
                                 className={`w-full px-3 py-2 text-xs rounded-lg border font-bold text-center transition focus:outline-none ${
-                                  errs?.hours || isHoursExceeded
+                                  errs?.hours
                                     ? 'bg-rose-50 border-rose-400 text-rose-900 focus:ring-2 focus:ring-rose-500'
                                     : 'bg-emerald-50/80 border-emerald-300 text-emerald-950 focus:ring-2 focus:ring-emerald-500'
                                 }`}
@@ -1465,6 +1508,22 @@ const EmployeeDashboard: React.FC = () => {
                               {errs?.hours && (
                                 <p className="text-[11px] font-bold text-rose-600 mt-1">{errs.hours}</p>
                               )}
+                            </td>
+
+                            <td className="py-3.5 px-4 align-top text-center">
+                              <select
+                                value={item.workDone}
+                                onChange={(e) => updateBoardItem(item.boardId, { workDone: Number(e.target.value) })}
+                                className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                title="Set 100% to submit this task for completion approval"
+                              >
+                                <option value={10}>10%</option>
+                                <option value={25}>25%</option>
+                                <option value={50}>50%</option>
+                                <option value={75}>75%</option>
+                                <option value={90}>90%</option>
+                                <option value={100}>100%</option>
+                              </select>
                             </td>
 
                             {/* Flag (Required Selection Yes / No) */}
@@ -1475,7 +1534,7 @@ const EmployeeDashboard: React.FC = () => {
                                   onChange={(e) => {
                                     const val = e.target.value;
                                     if (val === 'Yes') updateBoardItem(item.boardId, { flagged: true });
-                                    else if (val === 'No') updateBoardItem(item.boardId, { flagged: false, flagComment: '' });
+                                    else if (val === 'No') updateBoardItem(item.boardId, { flagged: false, flagComment: '', concernedPersonId: '', concernedPersonName: '' });
                                     else updateBoardItem(item.boardId, { flagged: null as any });
                                   }}
                                   className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-bold transition focus:outline-none ${
@@ -1486,16 +1545,6 @@ const EmployeeDashboard: React.FC = () => {
                                   <option value="No">No</option>
                                   <option value="Yes">Yes</option>
                                 </select>
-
-                                {item.flagged && (
-                                  <input
-                                    type="text"
-                                    value={item.flagComment || ''}
-                                    onChange={(e) => updateBoardItem(item.boardId, { flagComment: e.target.value })}
-                                    placeholder="Optional flag comment..."
-                                    className="w-full mt-1 px-2.5 py-1 text-[11px] bg-amber-50/80 border border-amber-300 rounded-lg text-amber-950 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
-                                  />
-                                )}
 
                                 {errs?.flagged && (
                                   <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.flagged}</p>
@@ -1548,11 +1597,13 @@ const EmployeeDashboard: React.FC = () => {
                             <td className="py-3 px-4 text-slate-600">{entry.details || '—'}</td>
                             <td className="py-3 px-4 text-slate-700">{entry.actionTaken}</td>
                             <td className="py-3 px-4 text-center whitespace-nowrap">{entry.date}</td>
-                            <td className="py-3 px-4 text-center font-bold">{Number(entry.hours).toFixed(1)}</td>
+                            <td className="py-3 px-4 text-center font-bold">{formatHoursMinutes(entry.hours)}</td>
                             <td className="py-3 px-4 text-center">
                               {entry.flagged ? (
-                                <span className="text-amber-800" title={entry.flagComment || 'Flagged'}>Flagged</span>
-                              ) : '—'}
+                                <span className="text-amber-800 font-bold">Yes</span>
+                              ) : (
+                                <span className="text-slate-500">No</span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -1570,10 +1621,10 @@ const EmployeeDashboard: React.FC = () => {
                   </p>
 
                   <button
-                    disabled={submitting || isHoursExceeded}
+                    disabled={submitting}
                     onClick={handleSubmitDailyBoard}
                     className={`px-8 py-3 rounded-xl font-extrabold text-sm shadow-md transition flex items-center gap-2 cursor-pointer ${
-                      submitting || isHoursExceeded
+                      submitting
                         ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
                         : 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
                     }`}
@@ -1757,7 +1808,7 @@ const EmployeeDashboard: React.FC = () => {
             {/* Total Hours Summary */}
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between text-xs text-indigo-950 font-bold">
               <span>Total Entries Found: {filteredDailyHistory.length}</span>
-              <span>Total Hours Calculated: <span className="text-indigo-600 text-sm font-black">{totalReportHours.toFixed(1)} Hours</span></span>
+              <span>Total Hours Calculated: <span className="text-indigo-600 text-sm font-black">{formatHoursMinutes(totalReportHours)}</span></span>
             </div>
 
             {filteredDailyHistory.length === 0 ? (
@@ -1786,7 +1837,7 @@ const EmployeeDashboard: React.FC = () => {
                         <td className="py-3 px-4 font-semibold text-slate-700">{entry.projectName}</td>
                         <td className="py-3 px-4 font-bold text-slate-900">{entry.taskTitle}</td>
                         <td className="py-3 px-4 text-slate-600">{entry.actionTaken}</td>
-                        <td className="py-3 px-4 font-black text-indigo-600">{entry.hours} hrs</td>
+                        <td className="py-3 px-4 font-black text-indigo-600">{formatHoursMinutes(entry.hours)}</td>
                         <td className="py-3 px-4">
                           {entry.flagged ? (
                             <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-rose-100 text-rose-800">
@@ -1857,6 +1908,7 @@ const EmployeeDashboard: React.FC = () => {
                         <th className="py-3 px-4">Date</th>
                         <th className="py-3 px-4">Project</th>
                         <th className="py-3 px-4">Task</th>
+                        <th className="py-3 px-4">Description</th>
                         <th className="py-3 px-4">Action Taken</th>
                         <th className="py-3 px-4 text-center">Hours</th>
                         <th className="py-3 px-4 text-center">Flag</th>
@@ -1870,8 +1922,9 @@ const EmployeeDashboard: React.FC = () => {
                           <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{entry.date}</td>
                           <td className="py-3 px-4 font-semibold text-slate-700">{entry.projectName}</td>
                           <td className="py-3 px-4 font-bold text-slate-900">{entry.taskTitle}</td>
+                          <td className="py-3 px-4 text-slate-600 max-w-xs">{entry.details || '—'}</td>
                           <td className="py-3 px-4 text-slate-600 max-w-xs">{entry.actionTaken}</td>
-                          <td className="py-3 px-4 text-center font-black text-indigo-600 whitespace-nowrap">{entry.hours} hrs</td>
+                          <td className="py-3 px-4 text-center font-black text-indigo-600 whitespace-nowrap">{formatHoursMinutes(entry.hours)}</td>
                           <td className="py-3 px-4 text-center">
                             {entry.flagged ? (
                               <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-rose-100 text-rose-800 border border-rose-300">
@@ -2018,22 +2071,51 @@ const EmployeeDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {reminders.map(r => (
-                  <div key={r.id || r._id} className="p-4 border border-slate-200 bg-slate-50/70 rounded-xl text-xs space-y-2 hover:border-slate-300 transition">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-slate-900 text-sm">{r.taskTitle}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-slate-500 font-semibold">{r.reminderDate}</span>
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                          r.status === 'Replied' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {r.status}
-                        </span>
+                {reminders.map(r => {
+                  const remId = r.id || r._id || '';
+                  const isClosed = r.status === 'Closed' || r.status === 'Completed';
+                  return (
+                    <div key={remId} className="p-4 border border-slate-200 bg-slate-50/70 rounded-xl text-xs space-y-2 hover:border-slate-300 transition">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-slate-900 text-sm">{r.taskTitle}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-500 font-semibold">{r.reminderDate}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            isClosed ? 'bg-emerald-100 text-emerald-800' :
+                            r.status === 'Replied' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {isClosed ? 'Closed' : r.status}
+                          </span>
+                        </div>
                       </div>
+                      {r.message && <p className="text-slate-600 font-medium">{r.message}</p>}
+                      {r.response && <p className="text-slate-700 italic">Follow-up: {r.response}</p>}
+                      {!isClosed && (
+                        <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                          <input
+                            type="text"
+                            value={reminderReplies[remId] || ''}
+                            onChange={(e) => setReminderReplies(prev => ({ ...prev, [remId]: e.target.value }))}
+                            placeholder="Enter follow-up notes..."
+                            className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs"
+                          />
+                          <button
+                            onClick={() => handleReplyReminder(remId)}
+                            className="px-3 py-2 bg-indigo-50 text-indigo-800 font-bold rounded-lg border border-indigo-200"
+                          >
+                            Save Follow-up
+                          </button>
+                          <button
+                            onClick={() => handleCloseReminder(remId)}
+                            className="px-3 py-2 bg-emerald-50 text-emerald-800 font-bold rounded-lg border border-emerald-200"
+                          >
+                            Mark Closed
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {r.message && <p className="text-slate-600 font-medium">{r.message}</p>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2132,9 +2214,11 @@ const EmployeeDashboard: React.FC = () => {
                   <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
                     <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
                     <p className="text-2xl font-black text-blue-950">
-                      {performance?.custom?.workDone ?? performance?.weekly?.workDone ?? performance?.tasksCompleted ?? 0}
+                      {performance?.custom?.taskCount ?? performance?.custom?.workDone ?? 0}
                     </p>
-                    <p className="text-[11px] text-blue-600 font-medium">Completed task entries in selected period</p>
+                    <p className="text-[11px] text-blue-600 font-medium">
+                      {(performance?.custom?.taskCount ?? 0)} Tasks
+                    </p>
                   </div>
 
                   <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
@@ -2169,9 +2253,11 @@ const EmployeeDashboard: React.FC = () => {
                   <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
                     <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
                     <p className="text-2xl font-black text-blue-950">
-                      {performance?.weekly?.workDone ?? performance?.tasksCompleted ?? 0}
+                      {performance?.weekly?.taskCount ?? performance?.weekly?.workDone ?? 0}
                     </p>
-                    <p className="text-[11px] text-blue-600 font-medium">Completed task entries this week</p>
+                    <p className="text-[11px] text-blue-600 font-medium">
+                      {(performance?.weekly?.taskCount ?? 0)} Tasks
+                    </p>
                   </div>
 
                   <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
@@ -2206,9 +2292,11 @@ const EmployeeDashboard: React.FC = () => {
                   <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
                     <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
                     <p className="text-2xl font-black text-blue-950">
-                      {performance?.monthly?.workDone ?? performance?.tasksCompleted ?? 0}
+                      {performance?.monthly?.taskCount ?? performance?.monthly?.workDone ?? 0}
                     </p>
-                    <p className="text-[11px] text-blue-600 font-medium">Completed task entries this month</p>
+                    <p className="text-[11px] text-blue-600 font-medium">
+                      {(performance?.monthly?.taskCount ?? 0)} Tasks
+                    </p>
                   </div>
 
                   <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
@@ -2282,6 +2370,11 @@ const EmployeeDashboard: React.FC = () => {
                     <div>
                       <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Flag Reason / Details:</p>
                       <p className="text-slate-800 bg-white p-2.5 rounded-lg border border-slate-200 font-medium">{f.flagMessage}</p>
+                    {(f.concernedPersonName || f.createdByName) && (
+                      <p className="text-[11px] text-slate-600 mt-1">
+                        From {f.createdByName || f.employeeName || 'Employee'} → {f.concernedPersonName || 'Unassigned'}
+                      </p>
+                    )}
                     </div>
 
                     {f.managementResponse && (
@@ -2421,6 +2514,20 @@ const EmployeeDashboard: React.FC = () => {
                     value={dailyWorkActionTaken}
                     onChange={(e) => setDailyWorkActionTaken(e.target.value)}
                     placeholder="Describe action taken (e.g. Reviewed drawing, corrected dimensions, saved file)"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:bg-white transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Hours (HH:MM) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={dailyWorkHours}
+                    onChange={(e) => setDailyWorkHours(e.target.value)}
+                    placeholder="01:30"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:bg-white transition"
                   />
                 </div>

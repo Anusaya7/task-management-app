@@ -7,7 +7,7 @@ export interface IReminder extends Document {
   employeeName?: string
   reminderDate: string // YYYY-MM-DD
   message?: string
-  status: 'Pending' | 'Replied' | 'Not Replied'
+  status: 'Pending' | 'Replied' | 'Not Replied' | 'Closed' | 'Completed'
   response?: string
   responseDate?: Date
   createdAt: Date
@@ -22,7 +22,7 @@ const reminderSchema = new Schema<IReminder>({
   message: { type: String },
   status: { 
     type: String, 
-    enum: ['Pending', 'Replied', 'Not Replied'], 
+    enum: ['Pending', 'Replied', 'Not Replied', 'Closed', 'Completed'], 
     default: 'Pending',
     required: true 
   },

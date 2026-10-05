@@ -152,9 +152,16 @@ export async function GET(req: Request) {
           const doneStr = new Date(t.approvalDate).toISOString().substring(0, 10)
           return doneStr >= startDateStr && doneStr <= endDateStr
         }).length
+        const taskIds = new Set(
+          rangeEntries
+            .map(e => e.taskId)
+            .filter((id): id is string => Boolean(id))
+        )
+        const taskCount = taskIds.size || rangeCompletedTasks
 
         return {
           workDone: rangeEntries.length + rangeCompletedTasks,
+          taskCount,
           workHours: Math.round(totalWorkHours * 10) / 10,
           freeHours: Math.round(totalFreeHours * 10) / 10
         }
@@ -182,12 +189,14 @@ export async function GET(req: Request) {
         directorRating: markingScore,
         weekly: {
           workDone: weeklyMetrics.workDone,
+          taskCount: weeklyMetrics.taskCount,
           workHours: weeklyMetrics.workHours,
           freeHours: weeklyMetrics.freeHours,
           marking: markingScore
         },
         monthly: {
           workDone: monthlyMetrics.workDone,
+          taskCount: monthlyMetrics.taskCount,
           workHours: monthlyMetrics.workHours,
           freeHours: monthlyMetrics.freeHours,
           marking: markingScore
@@ -196,6 +205,7 @@ export async function GET(req: Request) {
           startDate: customStartStr,
           endDate: customEndStr,
           workDone: customMetrics.workDone,
+          taskCount: customMetrics.taskCount,
           workHours: customMetrics.workHours,
           freeHours: customMetrics.freeHours,
           marking: markingScore

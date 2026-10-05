@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import mongoose from 'mongoose'
 import connectToDatabase from '@/lib/mongodb'
 import Task from '@/models/Task'
 import Project from '@/models/Project'
@@ -6,6 +7,7 @@ import Employee from '@/models/Employee'
 import PrivateRating from '@/models/PrivateRating'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 import { sendNotifications } from '@/lib/notifications'
+import { ensureAssigneeProgress, serializeTaskWithAssignees } from '@/lib/assigneeProgress'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +61,7 @@ export async function GET(req: Request) {
     if (projectId) query.projectId = projectId
 
     let tasks = await Task.find(query).sort({ updatedAt: -1 }).lean()
+    tasks = tasks.map(serializeTaskWithAssignees)
 
     // If Director, attach Private Ratings
     if (user.role === 'Director') {
@@ -99,9 +102,14 @@ export async function POST(req: Request) {
     await connectToDatabase()
     const body = await req.json()
     const { title, description, projectId, priority, assignedEmployeeIds, reminderDate } = body
+    const trimmedTitle = typeof title === 'string' ? title.trim() : ''
 
-    if (!title || !projectId) {
+    if (!trimmedTitle || !projectId) {
       return NextResponse.json({ error: 'Task Title and Project selection are required' }, { status: 400 })
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(projectId))) {
+      return NextResponse.json({ error: 'Selected Project does not exist' }, { status: 400 })
     }
 
     const project = await Project.findById(projectId)
@@ -112,9 +120,19 @@ export async function POST(req: Request) {
     let validAssignees: string[] = []
 
     if (user.role === 'Director') {
-      validAssignees = Array.isArray(assignedEmployeeIds) && assignedEmployeeIds.length > 0
-        ? assignedEmployeeIds
-        : [user._id.toString()]
+      const requested = Array.from(new Set((Array.isArray(assignedEmployeeIds) ? assignedEmployeeIds : []).filter((id: unknown) => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id))))
+      const allowedPriorities = ['Urgent', 'Medium', 'Low', 'Daily']
+      if (priority && !allowedPriorities.includes(priority)) {
+        return NextResponse.json({ error: 'Please select a valid priority.' }, { status: 400 })
+      }
+      const employeeDocs = await Employee.find({
+        _id: { $in: requested },
+        role: 'Employee'
+      }).select('_id firstName lastName')
+      validAssignees = employeeDocs.map(emp => emp._id.toString())
+      if (validAssignees.length === 0) {
+        return NextResponse.json({ error: 'Please assign at least one employee.' }, { status: 400 })
+      }
     } else if (user.role === 'Project Head') {
       const allowed = user.assignedEmployees || []
       const requested = Array.isArray(assignedEmployeeIds) ? assignedEmployeeIds : []
@@ -141,8 +159,8 @@ export async function POST(req: Request) {
     const taskPriority = user.role === 'Employee' ? 'Self' : (priority || 'Medium')
 
     const newTask = await Task.create({
-      title: title.trim(),
-      description: description ? description.trim() : title.trim(),
+      title: trimmedTitle,
+      description: description && String(description).trim() ? String(description).trim() : trimmedTitle,
       projectId: project._id.toString(),
       projectName: project.projectName,
       priority: taskPriority,
@@ -153,7 +171,8 @@ export async function POST(req: Request) {
       assignedEmployeeNames: assigneeNames,
       projectHeadId: user.role === 'Project Head' ? user._id.toString() : undefined,
       workDone: 0,
-      reminderDate: reminderDate || undefined
+      reminderDate: reminderDate || undefined,
+      assigneeProgress: ensureAssigneeProgress(validAssignees, assigneeNames),
     })
 
     // Send Notifications
@@ -190,7 +209,7 @@ export async function POST(req: Request) {
       })
     }
 
-    return NextResponse.json(newTask, { status: 201 })
+    return NextResponse.json(serializeTaskWithAssignees(newTask), { status: 201 })
   } catch (error: any) {
     console.error('Tasks POST API error:', error)
     return NextResponse.json({ error: 'Failed to create task' }, { status: 500 })

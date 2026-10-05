@@ -4,6 +4,7 @@ import Task from '@/models/Task'
 import TaskHistory from '@/models/TaskHistory'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 import { sendNotifications } from '@/lib/notifications'
+import { ensureAssigneeProgress } from '@/lib/assigneeProgress'
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -12,9 +13,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Only Director can approve task completion
-    if (user.role !== 'Director') {
-      return NextResponse.json({ error: 'Forbidden: Only Director can approve task completion' }, { status: 403 })
+    if (user.role !== 'Director' && user.role !== 'Project Head') {
+      return NextResponse.json({ error: 'Forbidden: Only Director or Project Head can approve task completion' }, { status: 403 })
     }
 
     await connectToDatabase()
@@ -26,6 +26,17 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
+    if (user.role === 'Project Head') {
+      const allowedEmps = user.assignedEmployees || []
+      const allowedProjs = user.assignedProjects || []
+      const isAllowed = (task.assignedEmployeeIds || []).some((id: string) => allowedEmps.includes(id)) ||
+                        allowedProjs.includes(task.projectId) ||
+                        task.projectHeadId === user._id.toString()
+      if (!isAllowed) {
+        return NextResponse.json({ error: 'Forbidden: Task outside assigned scope' }, { status: 403 })
+      }
+    }
+
     const today = getTodayKolkata()
 
     const directorName = `${user.firstName} ${user.lastName}`
@@ -35,6 +46,17 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       task.approvedBy = user._id.toString()
       task.approvalDate = new Date()
       task.approvalRemarks = remarks || 'Completion approved by Director'
+      task.workDone = 100
+      task.assigneeProgress = ensureAssigneeProgress(
+        task.assignedEmployeeIds || [],
+        task.assignedEmployeeNames || [],
+        (task.assigneeProgress || []).map(item => ({
+          ...item,
+          lastSubmittedAt: item.lastSubmittedAt ? new Date(item.lastSubmittedAt) : undefined
+        })),
+        'Completed',
+        100
+      ).map(item => ({ ...item, status: 'Completed' as const, workDone: 100, lastSubmittedAt: item.lastSubmittedAt ? new Date(item.lastSubmittedAt) : undefined }))
       task.updatedAt = new Date()
       await task.save()
 

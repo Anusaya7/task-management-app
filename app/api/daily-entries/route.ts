@@ -4,6 +4,10 @@ import DailyEntry from '@/models/DailyEntry'
 import Task from '@/models/Task'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 import { sendNotifications } from '@/lib/notifications'
+import { parseTimeInput } from '@/lib/timeFormat'
+import { applyEmployeeSubmission, aggregateAssigneeProgress, ensureAssigneeProgress } from '@/lib/assigneeProgress'
+import Flag from '@/models/Flag'
+import Employee from '@/models/Employee'
 
 export const dynamic = 'force-dynamic'
 
@@ -133,18 +137,18 @@ export async function POST(req: Request) {
       if (!actionTakenStr) {
         return NextResponse.json({ error: 'Action Taken is required for all tasks' }, { status: 400 })
       }
-      const hrs = Number(item.hours)
-      if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 8) {
-        return NextResponse.json({ error: 'Please enter valid Hours spent (0.1 to 8)' }, { status: 400 })
+      const parsedHours = parseTimeInput(item.hours ?? item.hoursDisplay)
+      if (!parsedHours.ok) {
+        return NextResponse.json({ error: parsedHours.error }, { status: 400 })
       }
+      item._parsedHours = parsedHours.hours
       if (item.flagged === undefined || item.flagged === null) {
         return NextResponse.json({ error: 'Please select Flag before submitting.' }, { status: 400 })
       }
 
-      totalSubmittedHours += hrs
+      totalSubmittedHours += parsedHours.hours
     }
 
-    // Check total working hours <= 8 for today
     const existingTodayEntries = await DailyEntry.find({
       employeeId: user._id.toString(),
       date: todayDate
@@ -177,12 +181,6 @@ export async function POST(req: Request) {
     const existingTotalHours = existingTodayEntries.reduce((sum, e) => sum + (e.hours || 0), 0)
     const grandTotal = Number((existingTotalHours + totalSubmittedHours).toFixed(2))
 
-    if (grandTotal > 8) {
-      return NextResponse.json({
-        error: `Total hours cannot exceed 8 hours. Currently allocated: ${existingTotalHours} hrs, attempting to add: ${totalSubmittedHours} hrs.`
-      }, { status: 400 })
-    }
-
     const createdEntries = []
     for (const item of entries) {
       const taskTitleStr = (item.taskTitle || item.title || 'Daily Work').trim()
@@ -199,7 +197,7 @@ export async function POST(req: Request) {
         details: detailsStr,
         actionTaken: actionTakenStr,
         date: todayDate,
-        hours: Number(item.hours),
+        hours: Number(item._parsedHours ?? item.hours),
         flagged: Boolean(item.flagged),
         flagComment: item.flagged ? (item.flagComment ? item.flagComment.trim() : '') : '',
         status: item.status || 'Submitted'
@@ -210,34 +208,96 @@ export async function POST(req: Request) {
         try {
           const task = await Task.findById(item.taskId)
           if (task) {
-            if (item.workDone !== undefined) {
-              task.workDone = Number(item.workDone)
+            const empName = `${user.firstName} ${user.lastName}`
+            const empId = user._id.toString()
+            const previousStatus = task.status
+            const submittedWorkDone = item.workDone !== undefined ? Number(item.workDone) : (task.workDone || 0)
+            task.assigneeProgress = applyEmployeeSubmission(
+              ensureAssigneeProgress(
+                task.assignedEmployeeIds || [],
+                task.assignedEmployeeNames || [],
+                task.assigneeProgress || [],
+                task.status,
+                task.workDone || 0
+              ),
+              empId,
+              empName,
+              submittedWorkDone
+            )
+            const aggregated = aggregateAssigneeProgress(task.assigneeProgress || [], task.status)
+            task.workDone = aggregated.workDone
+            if (task.status !== 'Completed') {
+              task.status = aggregated.status
             }
             if (item.flagged) {
               task.flagStatus = 'Open'
               task.flagMessage = item.flagComment
               task.flagDate = todayDate
             }
-            if (task.workDone === 100) {
-              task.status = 'Pending Approval'
+            if (aggregated.status === 'Pending Approval' && submittedWorkDone >= 100 && previousStatus !== 'Pending Approval' && previousStatus !== 'Completed') {
               await sendNotifications({
                 recipientRoles: ['Director'],
                 projectId: task.projectId,
-                employeeId: user._id.toString(),
+                employeeId: empId,
                 type: 'COMPLETION_PENDING',
-                title: `100% Task Completion Approval Required`,
-                message: `${user.firstName} ${user.lastName} submitted 100% completion for '${task.title}' in ${task.projectName}`,
+                title: `Task Completion Approval Required`,
+                message: `${empName} submitted completion for '${task.title}' in ${task.projectName}`,
                 taskId: task._id.toString(),
-                relatedUserId: user._id.toString(),
-                relatedUserName: `${user.firstName} ${user.lastName}`
+                relatedUserId: empId,
+                relatedUserName: empName
               })
-            } else {
-              task.status = 'In Progress'
             }
             await task.save()
           }
         } catch (err) {
           console.error('Error updating task from daily entry:', err)
+        }
+      }
+
+      if (item.flagged) {
+        const concernedPersonId = typeof item.concernedPersonId === 'string' ? item.concernedPersonId.trim() : ''
+        if (/^[a-f\d]{24}$/i.test(concernedPersonId)) {
+          const concerned = await Employee.findById(concernedPersonId).select('_id firstName lastName role')
+          if (concerned) {
+            const existingOpen = await Flag.findOne({
+              taskId: entry.taskId,
+              createdBy: user._id.toString(),
+              concernedPersonId: concerned._id.toString(),
+              status: 'Open'
+            })
+            if (!existingOpen) {
+              const creatorName = `${user.firstName} ${user.lastName}`
+              await Flag.create({
+                taskId: entry.taskId,
+                taskTitle: taskTitleStr,
+                projectId: entry.projectId,
+                projectName: entry.projectName,
+                employeeId: user._id.toString(),
+                employeeName: creatorName,
+                createdBy: user._id.toString(),
+                createdByName: creatorName,
+                createdByRole: user.role,
+                concernedPersonId: concerned._id.toString(),
+                concernedPersonName: `${concerned.firstName} ${concerned.lastName}`,
+                flagType: item.flagType || 'Needs Attention',
+                flagMessage: (item.flagComment || '').trim(),
+                flagDate: todayDate,
+                status: 'Open'
+              })
+              if (concerned._id.toString() !== user._id.toString()) {
+                await sendNotifications({
+                  recipientUserId: concerned._id.toString(),
+                  type: 'TASK_FLAGGED',
+                  title: `${creatorName} assigned a flag`,
+                  message: `${creatorName} flagged '${taskTitleStr}': ${(item.flagComment || '').trim()}`,
+                  taskId: entry.taskId,
+                  projectId: entry.projectId,
+                  relatedUserId: user._id.toString(),
+                  relatedUserName: creatorName
+                })
+              }
+            }
+          }
         }
       }
 

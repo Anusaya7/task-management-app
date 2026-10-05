@@ -4,6 +4,7 @@ import Project from '@/models/Project'
 import Task from '@/models/Task'
 import Employee from '@/models/Employee'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
+import { persistProjectStatus, serializeProject } from '@/lib/projectStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,13 +19,13 @@ export async function GET(req: Request) {
 
     if (user.role === 'Director') {
       const projects = await Project.find().sort({ updatedAt: -1 })
-      return NextResponse.json(projects)
+      return NextResponse.json(projects.map(serializeProject))
     }
 
     if (user.role === 'Project Head') {
       const allowedIds = user.assignedProjects || []
       const projects = await Project.find({ _id: { $in: allowedIds } }).sort({ updatedAt: -1 })
-      return NextResponse.json(projects)
+      return NextResponse.json(projects.map(serializeProject))
     }
 
     // Employee role: find projects linked to tasks assigned to this employee or directly assigned to employee
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
     const projectIds = Array.from(new Set([...taskProjectIds, ...directProjectIds].filter(Boolean)))
     const projects = await Project.find({ _id: { $in: projectIds } }).sort({ updatedAt: -1 })
 
-    return NextResponse.json(projects)
+    return NextResponse.json(projects.map(serializeProject))
   } catch (error: any) {
     console.error('Projects GET API error:', error)
     return NextResponse.json({ error: 'Failed to fetch projects' }, { status: 500 })
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
       location: location ? location.trim() : '',
       description: description.trim(),
       contactDetails: contactDetails ? contactDetails.trim() : '',
-      status: status || 'Current',
+      status: persistProjectStatus(status),
       projectRemarks: remarks
     })
 
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
       })
     }
 
-    return NextResponse.json(newProject, { status: 201 })
+    return NextResponse.json(serializeProject(newProject), { status: 201 })
   } catch (error: any) {
     console.error('Projects POST API error:', error)
     return NextResponse.json({ error: 'Failed to create project' }, { status: 500 })

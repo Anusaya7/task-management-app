@@ -16,7 +16,10 @@ export interface IFlag extends Document {
   employeeId: string
   employeeName?: string
   createdBy?: string
+  createdByName?: string
   createdByRole?: string
+  concernedPersonId?: string
+  concernedPersonName?: string
   flagType?: string
   flagMessage: string
   flagDate: string // YYYY-MM-DD
@@ -44,7 +47,10 @@ const flagSchema = new Schema<IFlag>({
   employeeId: { type: String, required: true, index: true },
   employeeName: { type: String },
   createdBy: { type: String },
+  createdByName: { type: String },
   createdByRole: { type: String },
+  concernedPersonId: { type: String, index: true },
+  concernedPersonName: { type: String },
   flagType: { type: String },
   flagMessage: { type: String, required: true },
   flagDate: { type: String, required: true },

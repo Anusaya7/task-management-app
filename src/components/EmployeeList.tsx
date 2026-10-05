@@ -597,7 +597,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         >
                           <Eye size={16} />
                         </button>
-                        {canEditEmployee && employee.id && (
+                        {canEditEmployee && (employee.id || (employee as any)._id) && (
                           <button
                             onClick={() => handleEditEmployee(employee)}
                             style={{
@@ -632,9 +632,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             <Edit size={16} />
                           </button>
                         )}
-                        {canDeleteEmployee && employee.id && (
+                        {canDeleteEmployee && (employee.id || (employee as any)._id) && (
                           <button
-                            onClick={() => handleDeleteEmployee(employee.id!)}
+                            onClick={() => handleDeleteEmployee((employee.id || (employee as any)._id)!)}
                             style={{
                               color: '#dc2626',
                               backgroundColor: '#fee2e2',

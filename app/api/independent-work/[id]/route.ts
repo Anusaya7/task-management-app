@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '../../../../lib/mongodb'
 import IndependentWork from '../../../../models/IndependentWork'
+import { getAuthUser } from '../../../../lib/auth'
 
 export async function GET(
   request: NextRequest,
@@ -99,8 +100,22 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getAuthUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     await dbConnect()
-    
+
+    const existing = await IndependentWork.findById(params.id)
+    if (!existing) {
+      return NextResponse.json({ message: 'Independent work entry not found' }, { status: 404 })
+    }
+
+    if (user.role === 'Employee' && existing.employeeId !== user._id.toString()) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     const work = await IndependentWork.findByIdAndDelete(params.id)
     
     if (!work) {

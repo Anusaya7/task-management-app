@@ -50,7 +50,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
       hoverEffect: 'hover:from-rose-600 hover:to-rose-700 hover:scale-105'
     },
     {
-      title: 'Current Projects',
+      title: 'Ongoing Projects',
       value: stats.currentProjects ?? sAny.totalProjects ?? 0,
       icon: FolderOpen,
       bgGradient: 'from-violet-500 to-violet-600',

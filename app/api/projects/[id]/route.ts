@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import Project from '@/models/Project'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
+import { persistProjectStatus, serializeProject } from '@/lib/projectStatus'
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -16,7 +17,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    return NextResponse.json(project)
+    return NextResponse.json(serializeProject(project))
   } catch (error: any) {
     console.error('Project GET by ID error:', error)
     return NextResponse.json({ error: 'Failed to fetch project' }, { status: 500 })
@@ -46,7 +47,10 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (body.location !== undefined) project.location = body.location.trim()
     if (body.description) project.description = body.description.trim()
     if (body.contactDetails !== undefined) project.contactDetails = body.contactDetails.trim()
-    if (body.status) project.status = body.status
+    if (body.status) project.status = persistProjectStatus(body.status)
+    if (Array.isArray(body.projectRemarks)) {
+      project.projectRemarks = body.projectRemarks
+    }
 
     if (body.newRemark) {
       const today = getTodayKolkata()
@@ -60,7 +64,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     project.updatedAt = new Date()
     await project.save()
 
-    return NextResponse.json(project)
+    return NextResponse.json(serializeProject(project))
   } catch (error: any) {
     console.error('Project PUT API error:', error)
     return NextResponse.json({ error: 'Failed to update project' }, { status: 500 })

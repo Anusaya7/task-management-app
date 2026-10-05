@@ -1,6 +1,7 @@
 import React from 'react';
 import { Project } from '../types';
 import { Calendar, User, TrendingUp, MessageCircle } from 'lucide-react';
+import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectOverviewProps {
   projects: Project[];
@@ -17,7 +18,8 @@ const ProjectOverview: React.FC<ProjectOverviewProps> = ({ projects }) => {
 
   const getStatusColor = (status: Project['status']) => {
     switch (status) {
-      case 'Current': return 'bg-green-100 text-green-800';
+      case 'Current':
+      case 'Ongoing': return 'bg-green-100 text-green-800';
       case 'Completed': return 'bg-blue-100 text-blue-800';
       case 'Sleeping (On Hold)': return 'bg-yellow-100 text-yellow-800';
       case 'Upcoming': return 'bg-blue-50 text-blue-700';
@@ -49,7 +51,7 @@ const ProjectOverview: React.FC<ProjectOverviewProps> = ({ projects }) => {
               )}
             </div>
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
-              {project.status}
+              {normalizeProjectStatus(project.status)}
             </span>
           </div>
           

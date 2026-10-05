@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '../../../../../lib/mongodb'
 import Project from '../../../../../models/Project'
+import { getAuthUser } from '../../../../../lib/auth'
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getAuthUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     await dbConnect()
     
-    const { userId, userName, userRole, content } = await request.json()
+    const { content } = await request.json()
     
-    if (!userId || !userName || !userRole || !content) {
-      return NextResponse.json({ message: 'All comment fields are required' }, { status: 400 })
+    if (!content) {
+      return NextResponse.json({ message: 'Comment content is required' }, { status: 400 })
     }
     
     // Validate MongoDB ObjectId format
@@ -27,9 +33,9 @@ export async function POST(
     
     const newComment = {
       id: Date.now().toString(),
-      userId,
-      userName,
-      userRole,
+      userId: user._id.toString(),
+      userName: `${user.firstName} ${user.lastName}`,
+      userRole: user.role,
       content,
       timestamp: new Date(),
       isVisibleToEmployee: true

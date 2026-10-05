@@ -27,20 +27,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Find employee by email or username
-    let user = await Employee.findOne({
+    const user = await Employee.findOne({
       $or: [{ email }, { username: email }]
     })
-
-    if (!user) {
-      try {
-        await seedDatabase()
-        user = await Employee.findOne({
-          $or: [{ email }, { username: email }]
-        })
-      } catch (seedErr) {
-        console.warn('On-demand seed failed:', seedErr)
-      }
-    }
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })

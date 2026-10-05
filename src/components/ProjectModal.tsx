@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Project, ProjectStatus } from '../types';
 import { X, Save, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { getTodayKolkata } from '@/lib/auth';
+import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectModalProps {
   project?: Project | null;
@@ -15,7 +16,7 @@ interface ProjectModalProps {
   onCommentAdded?: (projectId: string, comment: any) => void;
 }
 
-const PROJECT_STATUSES: ProjectStatus[] = ['Current', 'Upcoming', 'Sleeping (On Hold)', 'Completed'];
+const PROJECT_STATUSES: ProjectStatus[] = ['Ongoing', 'Upcoming', 'Sleeping (On Hold)', 'Completed'];
 
 const ProjectModal: React.FC<ProjectModalProps> = ({
   project,
@@ -28,7 +29,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [contactDetails, setContactDetails] = useState('');
-  const [status, setStatus] = useState<ProjectStatus>('Current');
+  const [status, setStatus] = useState<ProjectStatus>('Ongoing');
   const [remarks, setRemarks] = useState<{ date: string; remark: string }[]>([]);
   const [newRemarkText, setNewRemarkText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -43,7 +44,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       setLocation(project.location || '');
       setDescription(project.description || '');
       setContactDetails(project.contactDetails || '');
-      setStatus(project.status || 'Current');
+      setStatus(normalizeProjectStatus(project.status));
       setRemarks(project.projectRemarks || []);
     } else {
       setProjectName('');
@@ -51,7 +52,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       setLocation('');
       setDescription('');
       setContactDetails('');
-      setStatus('Current');
+      setStatus('Ongoing');
       setRemarks([]);
     }
     setNewRemarkText('');
@@ -166,7 +167,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
             {/* Lifecycle Status Dropdown */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Project Status *
+                Project Status
               </label>
               <select
                 value={status}
@@ -209,19 +210,20 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
             />
           </div>
 
-          {/* 5. Contact Details */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              5. Contact Details
-            </label>
-            <input
-              type="text"
-              value={contactDetails}
-              onChange={(e) => setContactDetails(e.target.value)}
-              placeholder="Client Contact / Phone / Email"
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
+          {project && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                5. Contact Details
+              </label>
+              <input
+                type="text"
+                value={contactDetails}
+                onChange={(e) => setContactDetails(e.target.value)}
+                placeholder="Client Contact / Phone / Email"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          )}
 
           {/* 6. Date-wise Project Remarks Timeline */}
           <div>

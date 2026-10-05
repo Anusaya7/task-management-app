@@ -11,7 +11,7 @@ export interface IProject extends Document {
     remark: string
     createdBy?: string
   }>
-  status: 'Current' | 'Upcoming' | 'Sleeping (On Hold)' | 'Completed'
+  status: 'Current' | 'Ongoing' | 'Upcoming' | 'Sleeping (On Hold)' | 'Completed'
   createdAt: Date
   updatedAt: Date
 }
@@ -29,9 +29,9 @@ const projectSchema = new Schema<IProject>({
   }],
   status: { 
     type: String, 
-    enum: ['Current', 'Upcoming', 'Sleeping (On Hold)', 'Completed'],
-    default: 'Current',
-    required: true
+    enum: ['Current', 'Ongoing', 'Upcoming', 'Sleeping (On Hold)', 'Completed'],
+    default: 'Ongoing',
+    required: false
   },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }

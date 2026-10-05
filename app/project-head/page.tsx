@@ -24,6 +24,10 @@ export default function ProjectHeadPage() {
   }, [user, loading, isDirector, isProjectHead, isEmployee, router])
 
 
+  if (user && (isProjectHead || isDirector)) {
+    return <Dashboard />
+  }
+
   if (loading || !user || (!isProjectHead && !isDirector)) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">

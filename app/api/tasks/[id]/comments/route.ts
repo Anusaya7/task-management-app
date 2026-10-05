@@ -1,22 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '../../../../../lib/mongodb'
 import Task from '../../../../../models/Task'
+import { getAuthUser } from '../../../../../lib/auth'
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getAuthUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     await dbConnect()
 
-    const { content, userId, userName, role } = await request.json()
+    const { content } = await request.json()
 
     const comment = {
       id: Date.now().toString(),
       taskId: params.id,
-      userId,
-      userName,
-      role,
+      userId: user._id.toString(),
+      userName: `${user.firstName} ${user.lastName}`,
+      role: user.role,
       content,
       timestamp: new Date().toISOString(),
       isVisibleToEmployee: true

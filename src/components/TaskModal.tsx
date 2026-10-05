@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Task, Project, Employee, TaskPriority } from '../types';
-import { X, Save, AlertCircle } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Search, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface TaskModalProps {
@@ -12,9 +12,15 @@ interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (taskData: any) => Promise<void>;
+  dataLoading?: boolean;
 }
 
-const PRIORITIES: TaskPriority[] = ['Urgent', 'Medium', 'Low', 'Self', 'Daily'];
+const DIRECTOR_PRIORITIES: { value: TaskPriority; label: string }[] = [
+  { value: 'Urgent', label: 'Urgent' },
+  { value: 'Medium', label: 'Less Urgent' },
+  { value: 'Low', label: 'Low Urgent' },
+  { value: 'Daily', label: 'Daily Task' }
+];
 
 const TaskModal: React.FC<TaskModalProps> = ({
   task,
@@ -22,19 +28,24 @@ const TaskModal: React.FC<TaskModalProps> = ({
   employees,
   isOpen,
   onClose,
-  onSave
+  onSave,
+  dataLoading = false
 }) => {
-  const { user, isDirector, isProjectHead, isEmployee } = useAuth();
+  const { user, isEmployee } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [priority, setPriority] = useState<TaskPriority>('Medium');
+  const [priority, setPriority] = useState<TaskPriority>('Urgent');
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [isEmployeeMenuOpen, setIsEmployeeMenuOpen] = useState(false);
   const [reminderDate, setReminderDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ title?: string; projectId?: string; employees?: string }>({});
+  const employeeMenuRef = useRef<HTMLDivElement | null>(null);
+  const submitLockRef = useRef(false);
 
-  // Only initialize form values when the modal transition opens (isOpen becomes true) or target task changes
   useEffect(() => {
     if (!isOpen) return;
 
@@ -42,238 +53,358 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setTitle(task.title || '');
       setDescription(task.description || '');
       setProjectId(task.projectId || '');
-      setPriority(task.priority || 'Medium');
-      setSelectedEmployeeIds(task.assignedEmployeeIds || []);
+      setPriority(task.priority && task.priority !== 'Self' ? task.priority : 'Urgent');
+      setSelectedEmployeeIds(Array.from(new Set(task.assignedEmployeeIds || [])));
       setReminderDate(task.reminderDate ? task.reminderDate.substring(0, 10) : '');
     } else {
       setTitle('');
       setDescription('');
-      setProjectId(projects.length > 0 ? (projects[0].id || projects[0]._id || '') : '');
-      setPriority(isEmployee ? 'Self' : 'Medium');
+      setProjectId('');
+      setPriority(isEmployee ? 'Self' : 'Urgent');
       setSelectedEmployeeIds(isEmployee && user?.id ? [user.id] : []);
       setReminderDate('');
     }
     setError('');
-  }, [isOpen, task?.id || (task as any)?._id]);
+    setFieldErrors({});
+    setEmployeeSearch('');
+    setIsEmployeeMenuOpen(false);
+    setIsSubmitting(false);
+    submitLockRef.current = false;
+  }, [isOpen, task?.id || (task as any)?._id, isEmployee, user?.id]);
 
-  // If projects list arrives after modal is opened and no project was selected yet, set default project without clearing user input
   useEffect(() => {
-    if (isOpen && !task && !projectId && projects.length > 0) {
-      setProjectId(projects[0].id || projects[0]._id || '');
-    }
-  }, [isOpen, task, projectId, projects]);
+    if (!isEmployeeMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (employeeMenuRef.current && !employeeMenuRef.current.contains(event.target as Node)) {
+        setIsEmployeeMenuOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsEmployeeMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isEmployeeMenuOpen]);
+
+  const assignableEmployees = useMemo(
+    () => employees.filter(emp => emp.role === 'Employee' && emp.status !== 'Inactive'),
+    [employees]
+  );
+
+  const getEmpId = (emp: Employee) => emp.id || emp._id || '';
+  const getEmpName = (emp: Employee) => `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+
+  const selectedEmployees = assignableEmployees.filter(emp => selectedEmployeeIds.includes(getEmpId(emp)));
+  const searchTerm = employeeSearch.trim().toLowerCase();
+  const filteredEmployees = assignableEmployees.filter(emp => {
+    const firstName = (emp.firstName || '').toLowerCase();
+    const lastName = (emp.lastName || '').toLowerCase();
+    const fullName = `${firstName} ${lastName}`.trim();
+    return !searchTerm || firstName.includes(searchTerm) || lastName.includes(searchTerm) || fullName.includes(searchTerm);
+  });
 
   if (!isOpen) return null;
 
+  const heading = task ? 'Edit Task' : (isEmployee ? 'Create Self Task' : 'Assign New Task');
+  const subtitle = task
+    ? 'Update task details and assigned employees.'
+    : (isEmployee ? 'Create a self-defined task for your daily work.' : 'Create a task and assign it to one or more employees.');
+  const primaryLabel = isSubmitting
+    ? (task ? 'Saving...' : (isEmployee ? 'Creating Task...' : 'Creating Task...'))
+    : (task ? 'Save Task' : (isEmployee ? 'Create Task' : 'Assign Task'));
+
+  const toggleEmployeeSelect = (empId: string) => {
+    if (!empId) return;
+    setSelectedEmployeeIds(prev => {
+      if (prev.includes(empId)) return prev.filter(id => id !== empId);
+      return [...prev, empId];
+    });
+    setFieldErrors(prev => ({ ...prev, employees: undefined }));
+    setEmployeeSearch('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLockRef.current || isSubmitting) return;
+
+    const trimmedTitle = title.trim();
+    const nextErrors: { title?: string; projectId?: string; employees?: string } = {};
+
+    if (!trimmedTitle) nextErrors.title = 'Task Title is required.';
+    if (!projectId) nextErrors.projectId = 'Please select a Project.';
+    if (!isEmployee && selectedEmployeeIds.length === 0) nextErrors.employees = 'Please select at least one employee.';
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setError(nextErrors.title || nextErrors.projectId || nextErrors.employees || 'Please complete the required fields.');
+      return;
+    }
+
     setError('');
-
-    if (!title.trim()) {
-      setError('Task Title is required.');
-      return;
-    }
-    if (!projectId) {
-      setError('Please select a Project.');
-      return;
-    }
-    if (selectedEmployeeIds.length === 0 && !isEmployee) {
-      setError('Please assign at least one employee.');
-      return;
-    }
-
+    submitLockRef.current = true;
     setIsSubmitting(true);
     try {
       await onSave({
-        title: title.trim(),
-        description: description.trim() || title.trim(),
+        title: trimmedTitle,
+        description: description.trim(),
         projectId,
         priority: isEmployee ? 'Self' : priority,
-        assignedEmployeeIds: isEmployee && user?.id ? [user.id] : selectedEmployeeIds,
+        assignedEmployeeIds: isEmployee && user?.id ? [user.id] : Array.from(new Set(selectedEmployeeIds)),
         reminderDate: reminderDate || undefined
       });
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Failed to save task');
+      setError(err.message || 'Unable to create task. Please try again.');
+      submitLockRef.current = false;
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const toggleEmployeeSelect = (empId: string) => {
-    if (selectedEmployeeIds.includes(empId)) {
-      setSelectedEmployeeIds(selectedEmployeeIds.filter(id => id !== empId));
-    } else {
-      setSelectedEmployeeIds([...selectedEmployeeIds, empId]);
-    }
-  };
+  const inputClass = (hasError?: string) =>
+    `w-full px-3.5 py-2.5 bg-slate-50 border rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:bg-white transition ${
+      hasError ? 'border-rose-400 focus:ring-rose-500' : 'border-slate-300 focus:ring-[#2563EB]'
+    }`;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
-          <h3 className="text-lg font-bold text-slate-800">
-            {task ? 'Edit Task' : (isEmployee ? 'Create Self Task' : 'Create New Task')}
-          </h3>
-          <button 
-            onClick={onClose} 
-            className="text-slate-400 hover:text-slate-600 transition"
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-3 sm:p-4">
+      <div className="my-auto flex w-full max-w-2xl max-h-[calc(100vh-1.5rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[min(90vh,calc(100vh-2rem))]">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">{heading}</h3>
+            <p className="mt-1 text-xs font-medium text-slate-500">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+            aria-label="Close"
           >
             <X size={20} />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium">
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Task Title */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Task Title *
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Draw Ground Floor Plan"
-              required
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-            />
-          </div>
-
-          {/* Project Dropdown */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Project *
-            </label>
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              required
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-            >
-              <option value="">{projects.length === 0 ? '-- No Projects Available (Create Project First) --' : '-- Select Project --'}</option>
-              {projects.map(p => (
-                <option key={p.id || p._id} value={p.id || p._id}>
-                  {p.projectName} ({p.projectNumber})
-                </option>
-              ))}
-            </select>
-            {projects.length === 0 && (
-              <p className="text-[11px] font-bold text-amber-600 mt-1">
-                No active projects found. Please click &quot;Create Project&quot; in My Projects tab to add a project first.
-              </p>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
+            {error && (
+              <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
+                <AlertCircle size={16} className="shrink-0" />
+                <span>{error}</span>
+              </div>
             )}
-          </div>
 
-          {/* Priority Dropdown (Exact 5 Priorities) */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Priority *
-            </label>
-            {isEmployee ? (
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Task Title *
+              </label>
               <input
                 type="text"
-                value="Self"
-                disabled
-                className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-300 rounded-lg text-sm font-semibold text-indigo-700 cursor-not-allowed"
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  if (fieldErrors.title) setFieldErrors(prev => ({ ...prev, title: undefined }));
+                }}
+                placeholder="Enter task title"
+                className={inputClass(fieldErrors.title)}
               />
-            ) : (
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-              >
-                {PRIORITIES.map(p => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {/* Assigned Employees (Multi-Select for Management) */}
-          {!isEmployee && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Assign Employees *
-              </label>
-              <div className="max-h-36 overflow-y-auto bg-slate-50 border border-slate-300 rounded-lg p-2.5 space-y-1.5">
-                {employees.map(emp => {
-                  const empId = emp.id || emp._id || '';
-                  const checked = selectedEmployeeIds.includes(empId);
-                  return (
-                    <label 
-                      key={empId} 
-                      className={`flex items-center gap-2.5 p-1.5 rounded cursor-pointer text-xs font-medium transition ${
-                        checked ? 'bg-indigo-50 text-indigo-900 font-semibold' : 'text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleEmployeeSelect(empId)}
-                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                      />
-                      <span>{emp.firstName} {emp.lastName} ({emp.role})</span>
-                    </label>
-                  );
-                })}
-              </div>
+              {fieldErrors.title && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.title}</p>}
             </div>
-          )}
 
-          {/* Description */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Task Description
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              placeholder="Enter detailed instructions or context..."
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-            />
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Project *
+              </label>
+              {dataLoading && projects.length === 0 ? (
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500">Loading projects...</p>
+              ) : (
+                <select
+                  value={projectId}
+                  onChange={(e) => {
+                    setProjectId(e.target.value);
+                    if (fieldErrors.projectId) setFieldErrors(prev => ({ ...prev, projectId: undefined }));
+                  }}
+                  className={inputClass(fieldErrors.projectId)}
+                >
+                  <option value="">{projects.length === 0 ? 'No projects available' : '-- Select Project --'}</option>
+                  {projects.map(p => (
+                    <option key={p.id || p._id} value={p.id || p._id}>
+                      {p.projectName} ({p.projectNumber})
+                    </option>
+                  ))}
+                </select>
+              )}
+              {projects.length === 0 && !dataLoading && (
+                <p className="mt-1 text-[11px] font-semibold text-amber-600">No projects available</p>
+              )}
+              {fieldErrors.projectId && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.projectId}</p>}
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Priority *
+              </label>
+              {isEmployee ? (
+                <input
+                  type="text"
+                  value="Self Defined"
+                  disabled
+                  className="w-full cursor-not-allowed rounded-lg border border-slate-300 bg-slate-100 px-3.5 py-2.5 text-sm font-semibold text-indigo-700"
+                />
+              ) : (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {DIRECTOR_PRIORITIES.map(option => {
+                    const selected = priority === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setPriority(option.value)}
+                        className={`rounded-lg border px-2.5 py-2 text-xs font-bold transition ${
+                          selected
+                            ? 'border-[#2563EB] bg-[#2563EB] text-white shadow-sm'
+                            : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {!isEmployee && (
+              <div ref={employeeMenuRef}>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Assign Employees *
+                </label>
+                {selectedEmployees.length > 0 && (
+                  <div className="mb-2">
+                    <p className="mb-1.5 text-[11px] font-semibold text-slate-500">Selected Employees:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedEmployees.map(emp => {
+                        const empId = getEmpId(emp);
+                        return (
+                          <span key={empId} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
+                            {getEmpName(emp)}
+                            <button
+                              type="button"
+                              onClick={() => toggleEmployeeSelect(empId)}
+                              className="text-blue-500 hover:text-rose-600"
+                              aria-label={`Remove ${getEmpName(emp)}`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {dataLoading && assignableEmployees.length === 0 ? (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500">Loading employees...</p>
+                ) : (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsEmployeeMenuOpen(open => !open)}
+                      className={`${inputClass(fieldErrors.employees)} flex items-center justify-between text-left`}
+                    >
+                      <span className={`flex items-center gap-2 ${employeeSearch || isEmployeeMenuOpen ? 'text-slate-900' : 'text-slate-400'}`}>
+                        <Search size={15} className="text-slate-400" />
+                        Search employee name...
+                      </span>
+                      <ChevronDown size={16} className={`text-slate-400 transition ${isEmployeeMenuOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isEmployeeMenuOpen && (
+                      <div className="absolute bottom-full left-0 right-0 z-30 mb-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                        <div className="border-b border-slate-100 p-2">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={employeeSearch}
+                            onChange={(e) => setEmployeeSearch(e.target.value)}
+                            placeholder="Type employee name..."
+                            className="w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                          />
+                        </div>
+                        <div className="max-h-44 overflow-y-auto p-1.5">
+                          {filteredEmployees.length === 0 ? (
+                            <p className="px-2 py-3 text-center text-xs font-medium text-slate-500">No employees found</p>
+                          ) : filteredEmployees.map(emp => {
+                            const empId = getEmpId(emp);
+                            const checked = selectedEmployeeIds.includes(empId);
+                            return (
+                              <button
+                                type="button"
+                                key={empId}
+                                onClick={() => toggleEmployeeSelect(empId)}
+                                className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-sm transition ${
+                                  checked ? 'bg-blue-50 font-semibold text-blue-900' : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span>{getEmpName(emp)}</span>
+                                {checked && <Check size={14} className="text-[#2563EB]" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {fieldErrors.employees && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.employees}</p>}
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Task Description
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={4}
+                placeholder="Enter task details..."
+                className={`${inputClass()} min-h-[96px] resize-y`}
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Reminder Date (Optional)
+              </label>
+              <input
+                type="date"
+                value={reminderDate}
+                onChange={(e) => setReminderDate(e.target.value)}
+                className={inputClass()}
+              />
+            </div>
           </div>
 
-          {/* Reminder Date */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Reminder Date (Optional)
-            </label>
-            <input
-              type="date"
-              value={reminderDate}
-              onChange={(e) => setReminderDate(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:gap-3 sm:px-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+              className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-lg shadow-sm transition disabled:opacity-60"
+              className="rounded-lg bg-[#2563EB] px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Save size={16} />
-              <span>{isSubmitting ? 'Saving...' : 'Save Task'}</span>
+              {primaryLabel}
             </button>
           </div>
         </form>

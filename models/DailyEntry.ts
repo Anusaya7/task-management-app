@@ -28,7 +28,7 @@ const dailyEntrySchema = new Schema<IDailyEntry>({
   details: { type: String },
   actionTaken: { type: String, required: true },
   date: { type: String, required: true, index: true },
-  hours: { type: Number, required: true, min: 0.1, max: 8 },
+  hours: { type: Number, required: true, min: 0, max: 24 },
   flagged: { type: Boolean, default: false },
   flagComment: { type: String },
   status: {

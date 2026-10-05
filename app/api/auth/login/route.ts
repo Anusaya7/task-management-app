@@ -24,17 +24,7 @@ export async function POST(req: Request) {
     }
 
     const cleanEmail = email.toLowerCase().trim()
-    let user = await Employee.findOne({ email: cleanEmail })
-
-    if (!user) {
-      // If user is not found, attempt on-demand seed to ensure initial accounts exist in DB
-      try {
-        await seedDatabase()
-        user = await Employee.findOne({ email: cleanEmail })
-      } catch (seedErr) {
-        console.warn('On-demand seed failed:', seedErr)
-      }
-    }
+    const user = await Employee.findOne({ email: cleanEmail })
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })

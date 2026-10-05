@@ -26,6 +26,10 @@ export default function DirectorPage() {
   }, [user, loading, isDirector, isProjectHead, isEmployee, router])
 
 
+  if (user && isDirector) {
+    return <Dashboard />
+  }
+
   if (loading || !user || !isDirector) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">

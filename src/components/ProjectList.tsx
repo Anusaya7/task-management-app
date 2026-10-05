@@ -5,6 +5,8 @@ import { Edit, Eye, Trash2, Plus, Download } from 'lucide-react';
 import { Project, User, Employee } from '../types';
 import ProjectModal from './ProjectModal';
 import { useAuth } from '../contexts/AuthContext';
+import { ProjectStatusBadge } from './BadgeUtils';
+import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectListProps {
   projects: Project[];
@@ -71,7 +73,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
 
   const getStatusColor = (status: Project['status']) => {
     switch (status) {
-      case 'Current': return 'bg-green-100 text-green-800';
+      case 'Current':
+      case 'Ongoing': return 'bg-green-100 text-green-800';
       case 'Upcoming': return 'bg-blue-100 text-blue-800';
       case 'Sleeping (On Hold)': return 'bg-yellow-100 text-yellow-800';
       case 'Completed': return 'bg-gray-100 text-gray-800';
@@ -103,7 +106,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
         project.projectNumber,
         project.location,
         project.contactDetails || '',
-        project.status,
+        normalizeProjectStatus(project.status),
         project.description
       ])
     ].map(row => row.map(field => `"${field}"`).join(',')).join('\n');
@@ -279,6 +282,18 @@ const ProjectList: React.FC<ProjectListProps> = ({
                 letterSpacing: '0.05em',
                 borderBottom: '1px solid #e5e7eb'
               }}>
+                Status
+              </th>
+              <th style={{
+                padding: '12px 24px',
+                textAlign: 'left',
+                fontSize: '12px',
+                fontWeight: '500',
+                color: '#6b7280',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                borderBottom: '1px solid #e5e7eb'
+              }}>
                 Actions
               </th>
             </tr>
@@ -286,7 +301,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
           <tbody style={{ backgroundColor: '#ffffff' }}>
             {projects.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{
+                <td colSpan={6} style={{
                   padding: '48px 24px',
                   textAlign: 'center',
                   color: '#6b7280'
@@ -398,6 +413,12 @@ const ProjectList: React.FC<ProjectListProps> = ({
                     }}>
                       {project.location || '-'}
                     </div>
+                  </td>
+                  <td style={{
+                    padding: '16px 24px',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    <ProjectStatusBadge status={normalizeProjectStatus(project.status)} />
                   </td>
                   <td style={{
                     padding: '16px 24px',

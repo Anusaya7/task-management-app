@@ -1,6 +1,6 @@
 export type UserRole = 'Director' | 'Project Head' | 'Employee';
 export type EmployeeStatus = 'Active' | 'Absent' | 'Inactive';
-export type ProjectStatus = 'Current' | 'Upcoming' | 'Sleeping (On Hold)' | 'Completed';
+export type ProjectStatus = 'Current' | 'Ongoing' | 'Upcoming' | 'Sleeping (On Hold)' | 'Completed';
 export type TaskPriority = 'Urgent' | 'Medium' | 'Low' | 'Self' | 'Daily';
 export type TaskStatus = 
   | 'Pending' 
@@ -101,6 +101,13 @@ export interface Task {
   assignedByName?: string;
   assignedEmployeeIds: string[];
   assignedEmployeeNames?: string[];
+  assigneeProgress?: Array<{
+    employeeId: string;
+    employeeName?: string;
+    status: TaskStatus;
+    workDone: number;
+    lastSubmittedAt?: string;
+  }>;
   projectHeadId?: string;
   workDone?: number; // 0 - 100
   reminderDate?: string;
@@ -131,7 +138,7 @@ export interface Reminder {
   employeeName?: string;
   reminderDate: string; // YYYY-MM-DD
   message?: string;
-  status: 'Pending' | 'Replied' | 'Not Replied';
+  status: 'Pending' | 'Replied' | 'Not Replied' | 'Closed' | 'Completed';
   response?: string;
   responseDate?: string;
   createdAt?: string;
@@ -157,7 +164,10 @@ export interface Flag {
   employeeId: string;
   employeeName?: string;
   createdBy?: string;
+  createdByName?: string;
   createdByRole?: UserRole;
+  concernedPersonId?: string;
+  concernedPersonName?: string;
   flagType?: string; // Needs Input, Needs Attention, Progress Concern, Client Dependency, Technical Issue, Priority Change, On Track
   flagMessage: string;
   flagDate: string;
@@ -240,12 +250,14 @@ export interface EmployeePerformance {
   directorRating?: number;
   weekly?: {
     workDone: number;
+    taskCount: number;
     workHours: number;
     freeHours: number;
     marking: number;
   };
   monthly?: {
     workDone: number;
+    taskCount: number;
     workHours: number;
     freeHours: number;
     marking: number;
@@ -254,6 +266,7 @@ export interface EmployeePerformance {
     startDate?: string;
     endDate?: string;
     workDone: number;
+    taskCount: number;
     workHours: number;
     freeHours: number;
     marking: number;

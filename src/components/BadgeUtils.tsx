@@ -9,32 +9,40 @@ export const PriorityBadge: React.FC<{ priority: TaskPriority | string }> = ({ p
 
   if (p === 'URGENT') {
     bg = 'bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]';
-  } else if (p === 'MEDIUM') {
+  } else if (p === 'MEDIUM' || p === 'LESS URGENT' || p === 'LESS_URGENT') {
     bg = 'bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]';
-  } else if (p === 'LOW') {
+  } else if (p === 'LOW' || p === 'LOW URGENT' || p === 'LOW_URGENT') {
     bg = 'bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0]';
-  } else if (p === 'SELF') {
+  } else if (p === 'SELF' || p === 'SELF DEFINED' || p === 'SELF_DEFINED') {
     bg = 'bg-[#F5F3FF] text-[#7C3AED] border-[#DDD6FE]';
-  } else if (p === 'DAILY') {
+  } else if (p === 'DAILY' || p === 'DAILY TASK' || p === 'DAILY_TASK') {
     bg = 'bg-[#EFF6FF] text-[#2563EB] border-[#BFDBFE]';
   }
+
+  const labelMap: Record<string, string> = {
+    URGENT: 'URGENT',
+    MEDIUM: 'LESS URGENT',
+    LOW: 'LOW URGENT',
+    SELF: 'SELF DEFINED',
+    DAILY: 'DAILY TASK'
+  };
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[11px] font-bold rounded-full border uppercase tracking-wide ${bg}`}>
       <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-      {p}
+      {labelMap[p] || p}
     </span>
   );
 };
 
 export const ProjectStatusBadge: React.FC<{ status: ProjectStatus | string }> = ({ status }) => {
-  const s = (status || 'Current').toString();
+  const s = (status || 'Ongoing').toString();
   let bg = 'bg-[#EFF6FF] text-[#2563EB] border-[#BFDBFE]';
-  let label = 'CURRENT';
+  let label = 'ONGOING';
 
-  if (s === 'Current') {
+  if (s === 'Current' || s === 'Ongoing') {
     bg = 'bg-[#EFF6FF] text-[#2563EB] border-[#BFDBFE]';
-    label = 'CURRENT';
+    label = 'ONGOING';
   } else if (s === 'Upcoming') {
     bg = 'bg-[#F5F3FF] text-[#7C3AED] border-[#DDD6FE]';
     label = 'UPCOMING';
@@ -130,15 +138,8 @@ export const SkeletonTable: React.FC = () => (
 );
 
 export function formatHoursMinutes(hoursNum: number): string {
-  const totalMinutes = Math.round((Number(hoursNum) || 0) * 60);
-  if (totalMinutes <= 0) return '0 Minutes';
+  const totalMinutes = Math.max(0, Math.round((Number(hoursNum) || 0) * 60));
   const hrs = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
-  if (hrs > 0 && mins > 0) {
-    return `${hrs} ${hrs === 1 ? 'Hour' : 'Hours'} ${mins} ${mins === 1 ? 'Minute' : 'Minutes'}`;
-  } else if (hrs > 0) {
-    return `${hrs} ${hrs === 1 ? 'Hour' : 'Hours'}`;
-  } else {
-    return `${mins} ${mins === 1 ? 'Minute' : 'Minutes'}`;
-  }
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }

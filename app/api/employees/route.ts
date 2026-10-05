@@ -11,10 +11,25 @@ export async function GET(req: Request) {
     }
 
     await connectToDatabase()
+    const { searchParams } = new URL(req.url)
+    const directory = searchParams.get('directory')
+
+    const serialize = (docs: any[]) => docs.map((doc) => {
+      const obj = doc.toObject()
+      return { ...obj, id: obj._id.toString() }
+    })
+
+    if (directory === 'assignees') {
+      const people = await Employee.find({
+        status: 'Active',
+        role: { $in: ['Employee', 'Director', 'Project Head'] }
+      }).select('_id firstName lastName role status').sort({ firstName: 1 })
+      return NextResponse.json(serialize(people))
+    }
 
     if (user.role === 'Director') {
       const employees = await Employee.find().select('-passwordHash').sort({ firstName: 1 })
-      return NextResponse.json(employees)
+      return NextResponse.json(serialize(employees))
     }
 
     if (user.role === 'Project Head') {
@@ -23,12 +38,12 @@ export async function GET(req: Request) {
         ? { $or: [{ _id: { $in: allowedIds } }, { _id: user._id }] }
         : { role: { $in: ['Employee', 'Project Head'] } }
       const employees = await Employee.find(filter).select('-passwordHash').sort({ firstName: 1 })
-      return NextResponse.json(employees)
+      return NextResponse.json(serialize(employees))
     }
 
     // Employee role: return self only
     const self = await Employee.find({ _id: user._id }).select('-passwordHash')
-    return NextResponse.json(self)
+    return NextResponse.json(serialize(self))
   } catch (error: any) {
     console.error('Employees GET API error:', error)
     return NextResponse.json({ error: 'Failed to fetch employees' }, { status: 500 })
