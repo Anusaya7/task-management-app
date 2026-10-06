@@ -117,7 +117,6 @@ const Dashboard: React.FC = () => {
   const [taskPriorityFilter, setTaskPriorityFilter] = useState<string>('all');
   const [taskStatusFilter, setTaskStatusFilter] = useState<string>('all');
   const [taskSearch, setTaskSearch] = useState<string>('');
-  const [overviewIndividualEmployee, setOverviewIndividualEmployee] = useState<Record<string, string>>({});
   const [employeeSearch, setEmployeeSearch] = useState<string>('');
 
   // Daily Task Board Filters
@@ -1713,12 +1712,18 @@ const Dashboard: React.FC = () => {
                           <PriorityBadge priority={t.priority} />
                         </td>
                         <td className="p-3.5">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 max-w-[180px]">
                             <EmployeeAvatar name={t.assignedEmployeeNames?.[0] || 'Staff'} size="sm" />
-                            <span className="font-semibold text-[#334155]">{t.assignedEmployeeNames?.join(', ') || '-'}</span>
+                            <span
+                              className="font-semibold text-[#334155] truncate"
+                              title={t.assignedEmployeeNames?.join(', ') || '-'}
+                            >
+                              {t.assignedEmployeeNames?.[0] || '-'}
+                              {(t.assignedEmployeeNames?.length || 0) > 1 ? ` +${(t.assignedEmployeeNames?.length || 1) - 1}` : ''}
+                            </span>
                           </div>
                         </td>
-                        <td className="p-3.5">
+                        <td className="p-3.5 whitespace-nowrap">
                           {(() => {
                             const progressItems = t.assigneeProgress && t.assigneeProgress.length > 0
                               ? t.assigneeProgress
@@ -1728,36 +1733,19 @@ const Dashboard: React.FC = () => {
                                   status: t.status,
                                   workDone: t.workDone || 0
                                 }));
-                            const selectedId = overviewIndividualEmployee[tId] || progressItems[0]?.employeeId;
-                            const selected = progressItems.find(item => item.employeeId === selectedId) || progressItems[0];
+                            const selected = progressItems.find(item => item.status === 'In Progress')
+                              || progressItems.find(item => item.status === 'Pending Approval')
+                              || [...progressItems].sort((a, b) => (b.workDone || 0) - (a.workDone || 0)).find(item => (item.workDone || 0) > 0)
+                              || progressItems[0];
 
                             if (!selected) {
                               return <span className="text-[#94A3B8]">-</span>;
                             }
 
                             return (
-                              <div className="space-y-1 min-w-[150px]">
-                                {progressItems.length > 1 && (
-                                  <select
-                                    value={selected.employeeId}
-                                    onChange={(e) => setOverviewIndividualEmployee(prev => ({
-                                      ...prev,
-                                      [tId]: e.target.value
-                                    }))}
-                                    className="w-full px-2 py-1 bg-white border border-[#CBD5E1] rounded-md text-[11px] font-semibold text-[#334155] focus:outline-none focus:border-[#2563EB]"
-                                    title="Select employee to view individual status"
-                                  >
-                                    {progressItems.map(item => (
-                                      <option key={item.employeeId} value={item.employeeId}>
-                                        {item.employeeName || 'Employee'}
-                                      </option>
-                                    ))}
-                                  </select>
-                                )}
-                                <div className="text-[11px] font-semibold text-[#334155]">
-                                  {selected.employeeName || 'Employee'} — {selected.status}
-                                </div>
-                              </div>
+                              <span className="text-[11px] font-semibold text-[#334155]">
+                                {selected.employeeName || 'Employee'} — {selected.status}
+                              </span>
                             );
                           })()}
                         </td>
