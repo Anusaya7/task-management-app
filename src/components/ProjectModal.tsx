@@ -91,8 +91,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      await onSave({
-        id: project?.id || project?._id,
+      const payload: Record<string, unknown> = {
         projectName: projectName.trim(),
         projectNumber: projectNumber.trim(),
         location: location.trim(),
@@ -100,7 +99,10 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
         contactDetails: contactDetails.trim(),
         status,
         projectRemarks: remarks
-      });
+      };
+      const existingId = project?.id || project?._id;
+      if (existingId) payload.id = existingId;
+      await onSave(payload);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to save project');

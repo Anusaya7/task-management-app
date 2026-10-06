@@ -101,12 +101,28 @@ export async function GET(req: Request) {
       const absentDays = await Attendance.countDocuments({ employeeId: empIdStr, status: 'Absent' })
       const flaggedTasksCount = await Flag.countDocuments({ employeeId: empIdStr })
 
-      // Rating/Marking from Director Ratings (or default 4.5/5)
-      const ratings = await PrivateRating.find({ employeeId: empIdStr })
-      let markingScore = 4.5
-      if (ratings.length > 0) {
-        const sum = ratings.reduce((acc, r) => acc + r.rating, 0)
-        markingScore = Math.round((sum / ratings.length) * 10) / 10
+      const ratings = await PrivateRating.find({ employeeId: empIdStr }).lean()
+      const ratingByTaskId = new Map<string, number>()
+      ratings.forEach(r => {
+        const taskId = r.taskId ? String(r.taskId) : ''
+        const storedRating = Number(r.rating)
+        if (!taskId || taskId === 'OFFICE_WORK') return
+        if (!Number.isFinite(storedRating) || storedRating < 1 || storedRating > 5) return
+        ratingByTaskId.set(taskId, storedRating)
+      })
+      const getExactTaskRating = (taskId: string | undefined | null): number | null => {
+        if (!taskId || taskId === 'OFFICE_WORK') return null
+        const storedRating = ratingByTaskId.get(String(taskId))
+        return typeof storedRating === 'number' && storedRating >= 1 && storedRating <= 5
+          ? storedRating
+          : null
+      }
+      let markingScore: number | null = null
+      const employeeRatings = Array.from(ratingByTaskId.values())
+      if (employeeRatings.length === 1) {
+        markingScore = employeeRatings[0]
+      } else if (employeeRatings.length > 1) {
+        markingScore = Math.round((employeeRatings.reduce((acc, value) => acc + value, 0) / employeeRatings.length) * 10) / 10
       }
 
       // Calculate Weekly, Monthly, and Custom Range metrics from Daily Entries
@@ -116,54 +132,101 @@ export async function GET(req: Request) {
       const calcMetrics = (startDateStr: string, endDateStr: string) => {
         const effectiveEnd = endDateStr < today ? endDateStr : today
         const hoursByDate: Record<string, number> = {}
+        const entriesByDate: Record<string, typeof dailyEntries> = {}
 
         for (const entry of dailyEntries) {
-          if (entry.date >= startDateStr && entry.date <= endDateStr) {
+          if (entry.date >= startDateStr && entry.date <= effectiveEnd) {
             hoursByDate[entry.date] = (hoursByDate[entry.date] || 0) + (Number(entry.hours) || 0)
+            if (!entriesByDate[entry.date]) entriesByDate[entry.date] = []
+            entriesByDate[entry.date].push(entry)
           }
         }
 
+        const workDates = Object.keys(entriesByDate).sort((a, b) => b.localeCompare(a))
         let totalWorkHours = 0
         let totalFreeHours = 0
+        const dayWise: Array<{
+          date: string
+          tasks: string[]
+          taskMarkings: Array<{ title: string; marking: number | null }>
+          workHours: number
+          freeHours: number
+          marking: number | null
+        }> = []
+        const periodRatedTaskIds = new Set<string>()
+        const periodRatings: number[] = []
 
-        const cur = new Date(startDateStr + 'T00:00:00Z')
-        const end = new Date(effectiveEnd + 'T00:00:00Z')
+        for (const dStr of workDates) {
+          const dayHours = Math.round((hoursByDate[dStr] || 0) * 60) / 60
+          const dayEntries = entriesByDate[dStr] || []
+          const freeHours = Math.round(Math.max(0, 8 - dayHours) * 60) / 60
+          totalWorkHours += dayHours
+          totalFreeHours += freeHours
 
-        while (cur <= end) {
-          const dStr = cur.toISOString().substring(0, 10)
-          const day = cur.getUTCDay()
-          const dayHours = hoursByDate[dStr] || 0
-
-          if (day >= 1 && day <= 5) {
-            // Weekday: 8 available hours logic
-            const logged = Math.min(8, dayHours)
-            totalWorkHours += dayHours
-            totalFreeHours += Math.max(0, 8 - logged)
-          } else {
-            // Weekend
-            totalWorkHours += dayHours
+          const taskMarkings: Array<{ title: string; marking: number | null }> = []
+          const seenTitles = new Set<string>()
+          const seenTaskKeys = new Set<string>()
+          for (const entry of dayEntries) {
+            const title = (entry.taskTitle || '').trim()
+            const taskId = entry.taskId ? String(entry.taskId) : ''
+            const taskKey = taskId || `title:${title.toLowerCase()}`
+            if (!title || seenTitles.has(title) || seenTaskKeys.has(taskKey)) continue
+            seenTitles.add(title)
+            seenTaskKeys.add(taskKey)
+            const marking = getExactTaskRating(taskId)
+            taskMarkings.push({ title, marking })
+            if (taskId && taskId !== 'OFFICE_WORK' && !periodRatedTaskIds.has(taskId)) {
+              periodRatedTaskIds.add(taskId)
+              if (marking !== null) periodRatings.push(marking)
+            }
           }
-          cur.setUTCDate(cur.getUTCDate() + 1)
+
+          const ratedValues = taskMarkings
+            .map(item => item.marking)
+            .filter((value): value is number => value !== null)
+          const allTasksRated = taskMarkings.length > 0 && ratedValues.length === taskMarkings.length
+          const sameRating = allTasksRated && ratedValues.every(value => value === ratedValues[0])
+          const marking = taskMarkings.length === 1
+            ? taskMarkings[0].marking
+            : sameRating
+              ? ratedValues[0]
+              : null
+
+          dayWise.push({
+            date: dStr,
+            tasks: taskMarkings.map(item => item.title),
+            taskMarkings,
+            workHours: dayHours,
+            freeHours,
+            marking
+          })
         }
 
-        const rangeEntries = dailyEntries.filter(e => e.date >= startDateStr && e.date <= endDateStr)
-        const rangeCompletedTasks = tasks.filter(t => {
-          if (t.status !== 'Completed' || !t.approvalDate) return false
-          const doneStr = new Date(t.approvalDate).toISOString().substring(0, 10)
-          return doneStr >= startDateStr && doneStr <= endDateStr
-        }).length
+        const rangeEntries = dailyEntries.filter(e => e.date >= startDateStr && e.date <= effectiveEnd)
         const taskIds = new Set(
           rangeEntries
             .map(e => e.taskId)
-            .filter((id): id is string => Boolean(id))
+            .filter((id): id is string => Boolean(id) && id !== 'OFFICE_WORK')
         )
-        const taskCount = taskIds.size || rangeCompletedTasks
+        const officeTitles = new Set(
+          rangeEntries
+            .filter(e => e.taskId === 'OFFICE_WORK')
+            .map(e => (e.taskTitle || '').trim().toLowerCase())
+            .filter(Boolean)
+        )
+        const taskCount = taskIds.size + officeTitles.size
 
         return {
-          workDone: rangeEntries.length + rangeCompletedTasks,
+          workDone: taskCount,
           taskCount,
-          workHours: Math.round(totalWorkHours * 10) / 10,
-          freeHours: Math.round(totalFreeHours * 10) / 10
+          workHours: Math.round(totalWorkHours * 60) / 60,
+          freeHours: Math.round(totalFreeHours * 60) / 60,
+          marking: periodRatings.length === 0
+            ? null
+            : periodRatings.length === 1
+              ? periodRatings[0]
+              : Math.round((periodRatings.reduce((sum, value) => sum + value, 0) / periodRatings.length) * 10) / 10,
+          dayWise
         }
       }
 
@@ -186,20 +249,22 @@ export async function GET(req: Request) {
         notRepliedCount,
         absentDays,
         flaggedTasksCount,
-        directorRating: markingScore,
+        directorRating: markingScore ?? undefined,
         weekly: {
           workDone: weeklyMetrics.workDone,
           taskCount: weeklyMetrics.taskCount,
           workHours: weeklyMetrics.workHours,
           freeHours: weeklyMetrics.freeHours,
-          marking: markingScore
+          marking: weeklyMetrics.marking,
+          dayWise: weeklyMetrics.dayWise
         },
         monthly: {
           workDone: monthlyMetrics.workDone,
           taskCount: monthlyMetrics.taskCount,
           workHours: monthlyMetrics.workHours,
           freeHours: monthlyMetrics.freeHours,
-          marking: markingScore
+          marking: monthlyMetrics.marking,
+          dayWise: monthlyMetrics.dayWise
         },
         custom: {
           startDate: customStartStr,
@@ -208,7 +273,8 @@ export async function GET(req: Request) {
           taskCount: customMetrics.taskCount,
           workHours: customMetrics.workHours,
           freeHours: customMetrics.freeHours,
-          marking: markingScore
+          marking: customMetrics.marking,
+          dayWise: customMetrics.dayWise
         }
       })
     }

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Project, Task, Reminder, Flag, TaskPriority, EmployeePerformance, DailyEntry } from '../types';
 import Sidebar, { TabType } from './Sidebar';
@@ -217,14 +217,53 @@ const EmployeeDashboard: React.FC = () => {
 
   const todayDateStr = getKolkataDateString();
 
-  // Performance Tab View State ('weekly' | 'monthly' | 'custom')
-  const [perfTab, setPerfTab] = useState<'weekly' | 'monthly' | 'custom'>('custom');
-  const [perfStartDate, setPerfStartDate] = useState<string>('2026-09-01');
+  // Performance Tab View State ('daily' | 'weekly' | 'monthly' | 'custom')
+  const [perfTab, setPerfTab] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
+  const [perfStartDate, setPerfStartDate] = useState<string>(todayDateStr);
   const [perfEndDate, setPerfEndDate] = useState<string>(todayDateStr);
+  const perfStartDateRef = useRef(perfStartDate);
+  const perfEndDateRef = useRef(perfEndDate);
+  const perfRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    perfStartDateRef.current = perfStartDate;
+    perfEndDateRef.current = perfEndDate;
+  }, [perfStartDate, perfEndDate]);
+
+  const normalizeDateRange = (start: string, end: string) => (
+    start <= end ? { start, end } : { start: end, end: start }
+  );
+
+  const getWeekBounds = (dateStr: string) => {
+    const [yr, mo, dy] = dateStr.split('-').map(Number);
+    const d = new Date(Date.UTC(yr, mo - 1, dy));
+    const day = d.getUTCDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setUTCDate(d.getUTCDate() + diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    return {
+      start: monday.toISOString().substring(0, 10),
+      end: sunday.toISOString().substring(0, 10)
+    };
+  };
+
+  const getMonthBounds = (dateStr: string) => {
+    const [yr, mo] = dateStr.split('-').map(Number);
+    const last = new Date(Date.UTC(yr, mo, 0)).getUTCDate();
+    return {
+      start: `${yr}-${String(mo).padStart(2, '0')}-01`,
+      end: `${yr}-${String(mo).padStart(2, '0')}-${String(last).padStart(2, '0')}`
+    };
+  };
 
   const handleApplyPerfDateRange = async (start: string, end: string) => {
+    const range = normalizeDateRange(start, end);
+    const requestId = ++perfRequestIdRef.current;
     try {
-      const res = await fetch(`/api/performance?startDate=${start}&endDate=${end}`);
+      const res = await fetch(`/api/performance?startDate=${encodeURIComponent(range.start)}&endDate=${encodeURIComponent(range.end)}`);
+      if (requestId !== perfRequestIdRef.current) return;
       if (res.ok) {
         const data = await res.json();
         if (data && data.length > 0) {
@@ -236,6 +275,99 @@ const EmployeeDashboard: React.FC = () => {
     }
   };
 
+  const applyPerfView = (tab: 'daily' | 'weekly' | 'monthly' | 'custom', start: string, end: string) => {
+    const range = normalizeDateRange(start, end);
+    perfStartDateRef.current = range.start;
+    perfEndDateRef.current = range.end;
+    setPerfTab(tab);
+    setPerfStartDate(range.start);
+    setPerfEndDate(range.end);
+    handleApplyPerfDateRange(range.start, range.end);
+  };
+
+  const formatPerformanceDate = (dateStr: string) => {
+    try {
+      return new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'UTC',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      }).format(new Date(`${dateStr}T00:00:00Z`));
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const formatPerformanceRange = (start: string, end: string) => {
+    const fmt = (dateStr: string) => {
+      try {
+        return new Intl.DateTimeFormat('en-IN', {
+          timeZone: 'UTC',
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric'
+        }).format(new Date(`${dateStr}T00:00:00Z`));
+      } catch {
+        return dateStr;
+      }
+    };
+    return `${fmt(start)} – ${fmt(end)}`;
+  };
+
+  const formatPerformanceMonth = (dateStr: string) => {
+    try {
+      return new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'UTC',
+        month: 'long',
+        year: 'numeric'
+      }).format(new Date(`${dateStr}T00:00:00Z`));
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const renderDirectorMarking = (marking: number | null | undefined) => {
+    const value = Number(marking);
+    if (marking === null || marking === undefined || Number.isNaN(value) || value < 1 || value > 5) {
+      return <span className="text-slate-400 font-semibold">Not Rated</span>;
+    }
+    return (
+      <span className="font-black text-amber-950">
+        {value} <span className="text-xs font-bold">/ 5</span>
+      </span>
+    );
+  };
+
+  const getRowTaskMarkings = (row: {
+    tasks?: string[];
+    taskMarkings?: Array<{ title: string; marking: number | null }>;
+  }) => {
+    if (row.taskMarkings && row.taskMarkings.length > 0) {
+      return row.taskMarkings;
+    }
+    return (row.tasks || []).map(title => ({ title, marking: null as number | null }));
+  };
+
+  const selectedPerfMetrics = performance?.custom;
+  const dayWiseRows = (selectedPerfMetrics?.dayWise || []).filter(row =>
+    (row.tasks && row.tasks.length > 0) || (Number(row.workHours) || 0) > 0
+  );
+  const selectedPeriodLabel = perfTab === 'daily'
+    ? formatPerformanceDate(perfStartDate)
+    : perfTab === 'weekly'
+      ? `Weekly Performance: ${formatPerformanceRange(perfStartDate, perfEndDate)}`
+      : perfTab === 'monthly'
+        ? formatPerformanceMonth(perfStartDate)
+        : formatPerformanceRange(perfStartDate, perfEndDate);
+  const selectedPeriodHeading = perfTab === 'daily'
+    ? 'DAILY PERFORMANCE'
+    : perfTab === 'weekly'
+      ? 'WEEKLY PERFORMANCE'
+      : perfTab === 'monthly'
+        ? 'MONTHLY PERFORMANCE'
+        : 'SELECTED PERIOD PERFORMANCE';
+
   const todayFormattedText = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
     weekday: 'long',
@@ -245,6 +377,7 @@ const EmployeeDashboard: React.FC = () => {
   }).format(new Date());
 
   const fetchData = async (isInitial = false) => {
+    const perfRequestId = ++perfRequestIdRef.current;
     try {
       if (isInitial) {
         setLoading(true);
@@ -255,7 +388,7 @@ const EmployeeDashboard: React.FC = () => {
         fetch('/api/projects'),
         fetch('/api/reminders'),
         fetch('/api/flags'),
-        fetch('/api/performance'),
+        fetch(`/api/performance?startDate=${encodeURIComponent(perfStartDateRef.current)}&endDate=${encodeURIComponent(perfEndDateRef.current)}`),
         fetch('/api/daily-entries')
       ]);
 
@@ -288,7 +421,7 @@ const EmployeeDashboard: React.FC = () => {
 
       if (perfRes.ok) {
         const perfData = await perfRes.json();
-        if (perfData && perfData.length > 0) {
+        if (perfRequestId === perfRequestIdRef.current && perfData && perfData.length > 0) {
           setPerformance(perfData[0]);
         }
       }
@@ -2127,7 +2260,7 @@ const EmployeeDashboard: React.FC = () => {
             <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-slate-200 gap-4">
               <div>
                 <h3 className="text-lg font-black text-[#172554]">MY PERFORMANCE</h3>
-                <p className="text-xs text-slate-500">View performance metrics filtered by custom calendar date range</p>
+                <p className="text-xs text-slate-500">View actual Daily Entry performance by day, week, month, or custom date range</p>
               </div>
 
               {/* Calendar Date Range Selector & View Toggles */}
@@ -2139,11 +2272,7 @@ const EmployeeDashboard: React.FC = () => {
                     <input
                       type="date"
                       value={perfStartDate}
-                      onChange={(e) => {
-                        setPerfStartDate(e.target.value);
-                        setPerfTab('custom');
-                        handleApplyPerfDateRange(e.target.value, perfEndDate);
-                      }}
+                      onChange={(e) => applyPerfView('custom', e.target.value, perfEndDate)}
                       className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -2152,11 +2281,7 @@ const EmployeeDashboard: React.FC = () => {
                     <input
                       type="date"
                       value={perfEndDate}
-                      onChange={(e) => {
-                        setPerfEndDate(e.target.value);
-                        setPerfTab('custom');
-                        handleApplyPerfDateRange(perfStartDate, e.target.value);
-                      }}
+                      onChange={(e) => applyPerfView('custom', perfStartDate, e.target.value)}
                       className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -2165,19 +2290,22 @@ const EmployeeDashboard: React.FC = () => {
                 <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
                   <button
                     onClick={() => {
-                      setPerfTab('custom');
-                      handleApplyPerfDateRange(perfStartDate, perfEndDate);
+                      const day = perfEndDate || todayDateStr;
+                      applyPerfView('daily', day, day);
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                      perfTab === 'custom'
+                      perfTab === 'daily'
                         ? 'bg-[#2563EB] text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Calendar Range
+                    Daily
                   </button>
                   <button
-                    onClick={() => setPerfTab('weekly')}
+                    onClick={() => {
+                      const week = getWeekBounds(perfEndDate || todayDateStr);
+                      applyPerfView('weekly', week.start, week.end);
+                    }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
                       perfTab === 'weekly'
                         ? 'bg-[#2563EB] text-white shadow-xs'
@@ -2187,7 +2315,10 @@ const EmployeeDashboard: React.FC = () => {
                     Weekly
                   </button>
                   <button
-                    onClick={() => setPerfTab('monthly')}
+                    onClick={() => {
+                      const month = getMonthBounds(perfEndDate || todayDateStr);
+                      applyPerfView('monthly', month.start, month.end);
+                    }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
                       perfTab === 'monthly'
                         ? 'bg-[#2563EB] text-white shadow-xs'
@@ -2196,6 +2327,16 @@ const EmployeeDashboard: React.FC = () => {
                   >
                     Monthly
                   </button>
+                  <button
+                    onClick={() => applyPerfView('custom', perfStartDate, perfEndDate)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      perfTab === 'custom'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Custom
+                  </button>
                 </div>
               </div>
             </div>
@@ -2203,128 +2344,110 @@ const EmployeeDashboard: React.FC = () => {
             {/* Selected Date Range Display Badge */}
             <div className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 inline-flex items-center gap-2">
               <Calendar size={14} className="text-indigo-600" />
-              <span>Viewing Performance Period: <span className="font-extrabold text-indigo-950">{perfTab === 'weekly' ? 'Current Week' : perfTab === 'monthly' ? 'Current Month' : `${perfStartDate} to ${perfEndDate}`}</span></span>
+              <span>Viewing Performance Period: <span className="font-extrabold text-indigo-950">{selectedPeriodLabel}</span></span>
             </div>
 
             {/* Performance Cards */}
-            {perfTab === 'custom' ? (
-              <div className="space-y-4">
-                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">SELECTED PERIOD PERFORMANCE ({perfStartDate} to {perfEndDate})</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
-                    <p className="text-2xl font-black text-blue-950">
-                      {performance?.custom?.taskCount ?? performance?.custom?.workDone ?? 0}
-                    </p>
-                    <p className="text-[11px] text-blue-600 font-medium">
-                      {(performance?.custom?.taskCount ?? 0)} Tasks
-                    </p>
-                  </div>
+            <div className="space-y-4">
+              <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">{selectedPeriodHeading}</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
+                  <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
+                  <p className="text-2xl font-black text-blue-950">
+                    {selectedPerfMetrics?.taskCount ?? selectedPerfMetrics?.workDone ?? 0}
+                  </p>
+                  <p className="text-[11px] text-blue-600 font-medium">
+                    {(selectedPerfMetrics?.taskCount ?? 0)} Tasks
+                  </p>
+                </div>
 
-                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
-                    <p className="text-lg font-black text-emerald-950">
-                      {formatHoursMinutes(performance?.custom?.workHours ?? performance?.weekly?.workHours ?? 0)}
-                    </p>
-                    <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
-                  </div>
+                <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
+                  <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
+                  <p className="text-lg font-black text-emerald-950">
+                    {formatHoursMinutes(selectedPerfMetrics?.workHours ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
+                </div>
 
-                  <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
-                    <p className="text-lg font-black text-purple-950">
-                      {formatHoursMinutes(performance?.custom?.freeHours ?? performance?.weekly?.freeHours ?? 0)}
-                    </p>
-                    <p className="text-[11px] text-purple-600 font-medium">Available standard working capacity</p>
-                  </div>
+                <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
+                  <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
+                  <p className="text-lg font-black text-purple-950">
+                    {formatHoursMinutes(selectedPerfMetrics?.freeHours ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-purple-600 font-medium">8 hours minus actual work hours on working days</p>
+                </div>
 
-                  <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-amber-700 uppercase tracking-wider">Marking</p>
-                    <p className="text-2xl font-black text-amber-950">
-                      {performance?.custom?.marking ?? performance?.directorRating ?? 4.5} <span className="text-sm font-bold">/ 5</span>
-                    </p>
-                    <p className="text-[11px] text-amber-600 font-medium">Director score (Read-only)</p>
-                  </div>
+                <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
+                  <p className="text-xs font-bold text-amber-700 uppercase tracking-wider">Marking</p>
+                  <p className="text-2xl font-black text-amber-950">
+                    {renderDirectorMarking(selectedPerfMetrics?.marking)}
+                  </p>
+                  <p className="text-[11px] text-amber-600 font-medium">Exact Director rating (Read-only)</p>
                 </div>
               </div>
-            ) : perfTab === 'weekly' ? (
-              <div className="space-y-4">
-                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">WEEKLY PERFORMANCE</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
-                    <p className="text-2xl font-black text-blue-950">
-                      {performance?.weekly?.taskCount ?? performance?.weekly?.workDone ?? 0}
-                    </p>
-                    <p className="text-[11px] text-blue-600 font-medium">
-                      {(performance?.weekly?.taskCount ?? 0)} Tasks
-                    </p>
-                  </div>
+            </div>
 
-                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
-                    <p className="text-lg font-black text-emerald-950">
-                      {formatHoursMinutes(performance?.weekly?.workHours ?? 0)}
-                    </p>
-                    <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
-                  </div>
-
-                  <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
-                    <p className="text-lg font-black text-purple-950">
-                      {formatHoursMinutes(performance?.weekly?.freeHours ?? 0)}
-                    </p>
-                    <p className="text-[11px] text-purple-600 font-medium">(40 hrs standard capacity)</p>
-                  </div>
-
-                  <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-amber-700 uppercase tracking-wider">Marking</p>
-                    <p className="text-2xl font-black text-amber-950">
-                      {performance?.weekly?.marking ?? performance?.directorRating ?? 4.5} <span className="text-sm font-bold">/ 5</span>
-                    </p>
-                    <p className="text-[11px] text-amber-600 font-medium">Director score (Read-only)</p>
-                  </div>
-                </div>
+            <section className="space-y-3 pt-2">
+              <div>
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Day-Wise Performance</h4>
+                <p className="text-xs text-slate-500 mt-1">Daily work, hours, free time, and Director marking for the selected period.</p>
               </div>
-            ) : (
-              <div className="space-y-4">
-                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">MONTHLY PERFORMANCE</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
-                    <p className="text-2xl font-black text-blue-950">
-                      {performance?.monthly?.taskCount ?? performance?.monthly?.workDone ?? 0}
-                    </p>
-                    <p className="text-[11px] text-blue-600 font-medium">
-                      {(performance?.monthly?.taskCount ?? 0)} Tasks
-                    </p>
-                  </div>
-
-                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
-                    <p className="text-lg font-black text-emerald-950">
-                      {formatHoursMinutes(performance?.monthly?.workHours ?? 0)}
-                    </p>
-                    <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
-                  </div>
-
-                  <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
-                    <p className="text-lg font-black text-purple-950">
-                      {formatHoursMinutes(performance?.monthly?.freeHours ?? 0)}
-                    </p>
-                    <p className="text-[11px] text-purple-600 font-medium">(176 hrs standard capacity)</p>
-                  </div>
-
-                  <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
-                    <p className="text-xs font-bold text-amber-700 uppercase tracking-wider">Marking</p>
-                    <p className="text-2xl font-black text-amber-950">
-                      {performance?.monthly?.marking ?? performance?.directorRating ?? 4.5} <span className="text-sm font-bold">/ 5</span>
-                    </p>
-                    <p className="text-[11px] text-amber-600 font-medium">Director score (Read-only)</p>
-                  </div>
-                </div>
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-left border-collapse min-w-[720px]">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Work Done / Tasks</th>
+                      <th className="py-3 px-4 text-right">Work Hours</th>
+                      <th className="py-3 px-4 text-right">Free Time</th>
+                      <th className="py-3 px-4 text-right">Marking</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-xs">
+                    {dayWiseRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 px-4 text-center text-slate-400 font-semibold">
+                          No performance data available for the selected period.
+                        </td>
+                      </tr>
+                    ) : (
+                      dayWiseRows.map(row => {
+                        const taskRows = getRowTaskMarkings(row);
+                        return (
+                        <tr key={row.date} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap align-top">
+                            {formatPerformanceDate(row.date)}
+                          </td>
+                          <td className="py-3 px-4 text-slate-700">
+                            <ul className="space-y-0.5">
+                              {taskRows.map((task, idx) => (
+                                <li key={`${row.date}-${task.title}-${idx}`}>{task.title}</li>
+                              ))}
+                            </ul>
+                          </td>
+                          <td className="py-3 px-4 text-right font-black text-emerald-800 whitespace-nowrap align-top">
+                            {formatHoursMinutes(row.workHours)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-black text-purple-800 whitespace-nowrap align-top">
+                            {formatHoursMinutes(row.freeHours)}
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap align-top">
+                            <ul className="space-y-0.5">
+                              {taskRows.map((task, idx) => (
+                                <li key={`${row.date}-marking-${task.title}-${idx}`}>
+                                  {renderDirectorMarking(task.marking)}
+                                </li>
+                              ))}
+                            </ul>
+                          </td>
+                        </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
-            )}
+            </section>
           </div>
         )}
 

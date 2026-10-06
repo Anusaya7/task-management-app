@@ -253,14 +253,30 @@ export interface EmployeePerformance {
     taskCount: number;
     workHours: number;
     freeHours: number;
-    marking: number;
+    marking: number | null;
+    dayWise?: Array<{
+      date: string;
+      tasks: string[];
+      taskMarkings?: Array<{ title: string; marking: number | null }>;
+      workHours: number;
+      freeHours: number;
+      marking: number | null;
+    }>;
   };
   monthly?: {
     workDone: number;
     taskCount: number;
     workHours: number;
     freeHours: number;
-    marking: number;
+    marking: number | null;
+    dayWise?: Array<{
+      date: string;
+      tasks: string[];
+      taskMarkings?: Array<{ title: string; marking: number | null }>;
+      workHours: number;
+      freeHours: number;
+      marking: number | null;
+    }>;
   };
   custom?: {
     startDate?: string;
@@ -269,7 +285,15 @@ export interface EmployeePerformance {
     taskCount: number;
     workHours: number;
     freeHours: number;
-    marking: number;
+    marking: number | null;
+    dayWise?: Array<{
+      date: string;
+      tasks: string[];
+      taskMarkings?: Array<{ title: string; marking: number | null }>;
+      workHours: number;
+      freeHours: number;
+      marking: number | null;
+    }>;
   };
 }
 

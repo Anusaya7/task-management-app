@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Project,
@@ -76,6 +76,7 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const projectsRequestIdRef = useRef(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
@@ -145,13 +146,38 @@ const Dashboard: React.FC = () => {
   const [dashPerfStartDate, setDashPerfStartDate] = useState<string>('2026-09-01');
   const [dashPerfEndDate, setDashPerfEndDate] = useState<string>('2026-10-01');
 
+  const applyProjectsFromApi = (data: unknown, requestId: number) => {
+    if (requestId !== projectsRequestIdRef.current) return;
+    if (Array.isArray(data)) {
+      setProjects(data);
+    }
+  };
+
+  const reloadProjects = async () => {
+    const requestId = ++projectsRequestIdRef.current;
+    try {
+      const res = await fetch('/api/projects', { cache: 'no-store' });
+      if (!res.ok) return;
+      applyProjectsFromApi(await res.json(), requestId);
+    } catch (err) {
+      console.error('Failed to reload projects:', err);
+    }
+  };
+
+  const openCreateTask = () => {
+    setSelectedTask(null);
+    setIsTaskModalOpen(true);
+    void reloadProjects();
+  };
+
   const fetchData = async (isInitial = false) => {
+    const projectsRequestId = ++projectsRequestIdRef.current;
     try {
       if (isInitial) {
         setLoading(true);
       }
       const [projectsRes, tasksRes, empRes, flagsRes, perfRes, remindersRes, dailyRes] = await Promise.all([
-        fetch('/api/projects'),
+        fetch('/api/projects', { cache: 'no-store' }),
         fetch('/api/tasks'),
         fetch('/api/employees'),
         fetch('/api/flags'),
@@ -160,7 +186,7 @@ const Dashboard: React.FC = () => {
         fetch('/api/daily-entries')
       ]);
 
-      if (projectsRes.ok) setProjects(await projectsRes.json());
+      if (projectsRes.ok) applyProjectsFromApi(await projectsRes.json(), projectsRequestId);
       if (tasksRes.ok) setTasks(await tasksRes.json());
       if (empRes.ok) setEmployees(await empRes.json());
       if (flagsRes.ok) setFlags(await flagsRes.json());
@@ -345,7 +371,8 @@ const Dashboard: React.FC = () => {
       }
       showToast('success', 'Project deleted successfully.');
       setDeleteConfirm(null);
-      fetchData();
+      setProjects(prev => prev.filter(p => String(p.id || p._id) !== String(projectId)));
+      await reloadProjects();
     } catch (err) {
       showToast('error', 'Network error.');
     }
@@ -418,14 +445,20 @@ const Dashboard: React.FC = () => {
   // Save Project Handler
   const handleSaveProject = async (projectData: any) => {
     try {
-      const isEdit = !!projectData.id || !!projectData._id;
-      const url = isEdit ? `/api/projects/${projectData.id || projectData._id}` : '/api/projects';
+      const candidateId = String(projectData?.id || projectData?._id || '');
+      const isEdit = /^[a-f\d]{24}$/i.test(candidateId);
+      const url = isEdit ? `/api/projects/${candidateId}` : '/api/projects';
       const method = isEdit ? 'PUT' : 'POST';
+      const payload = { ...projectData };
+      if (!isEdit) {
+        delete payload.id;
+        delete payload._id;
+      }
 
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(projectData)
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
@@ -433,8 +466,26 @@ const Dashboard: React.FC = () => {
         throw new Error(data.error || 'Failed to save project');
       }
 
+      const saved = await res.json();
       showToast('success', isEdit ? 'Project updated successfully.' : 'Project created successfully.');
-      fetchData();
+      if (!isEdit) {
+        setProjectStatusFilter('all');
+        setSelectedProject(null);
+      }
+      if (saved && (saved.id || saved._id)) {
+        const savedId = String(saved.id || saved._id);
+        setProjects(prev => {
+          const list = Array.isArray(prev) ? prev : [];
+          const idx = list.findIndex(p => String(p.id || p._id) === savedId);
+          if (idx >= 0) {
+            const next = [...list];
+            next[idx] = { ...list[idx], ...saved };
+            return next;
+          }
+          return [saved, ...list];
+        });
+      }
+      await reloadProjects();
     } catch (err: any) {
       throw err;
     }
@@ -619,7 +670,7 @@ const Dashboard: React.FC = () => {
             )}
 
             <button
-              onClick={() => { setSelectedTask(null); setIsTaskModalOpen(true); }}
+              onClick={openCreateTask}
               className="flex items-center gap-1.5 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold rounded-lg text-xs shadow-xs transition cursor-pointer"
             >
               <Plus size={14} />
@@ -1150,7 +1201,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-[#64748B]">Tasks assigned specifically to you as Director</p>
               </div>
               <button
-                onClick={() => { setSelectedTask(null); setIsTaskModalOpen(true); }}
+                onClick={openCreateTask}
                 className="flex items-center gap-1.5 px-3.5 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold rounded-lg text-xs transition cursor-pointer"
               >
                 <Plus size={14} />
@@ -1676,7 +1727,7 @@ const Dashboard: React.FC = () => {
                 </select>
 
                 <button
-                  onClick={() => { setSelectedTask(null); setIsTaskModalOpen(true); }}
+                  onClick={openCreateTask}
                   className="flex items-center gap-1.5 px-3.5 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold rounded-lg text-xs transition cursor-pointer"
                 >
                   <Plus size={14} />
@@ -1883,7 +1934,7 @@ const Dashboard: React.FC = () => {
           isOpen={isProjectModalOpen}
           project={selectedProject}
           users={[]}
-          onClose={() => setIsProjectModalOpen(false)}
+          onClose={() => { setIsProjectModalOpen(false); setSelectedProject(null); }}
           onSave={handleSaveProject}
         />
 
