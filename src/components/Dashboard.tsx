@@ -117,6 +117,7 @@ const Dashboard: React.FC = () => {
   const [taskPriorityFilter, setTaskPriorityFilter] = useState<string>('all');
   const [taskStatusFilter, setTaskStatusFilter] = useState<string>('all');
   const [taskSearch, setTaskSearch] = useState<string>('');
+  const [overviewIndividualEmployee, setOverviewIndividualEmployee] = useState<Record<string, string>>({});
   const [employeeSearch, setEmployeeSearch] = useState<string>('');
 
   // Daily Task Board Filters
@@ -1718,29 +1719,47 @@ const Dashboard: React.FC = () => {
                           </div>
                         </td>
                         <td className="p-3.5">
-                          <div className="space-y-1">
-                            {(t.assigneeProgress && t.assigneeProgress.length > 0
+                          {(() => {
+                            const progressItems = t.assigneeProgress && t.assigneeProgress.length > 0
                               ? t.assigneeProgress
-                              : (t.assignedEmployeeNames || []).map((name, index) => ({
-                                  employeeId: t.assignedEmployeeIds?.[index] || `${index}`,
-                                  employeeName: name,
+                              : (t.assignedEmployeeIds || []).map((employeeId, index) => ({
+                                  employeeId,
+                                  employeeName: t.assignedEmployeeNames?.[index] || 'Employee',
                                   status: t.status,
                                   workDone: t.workDone || 0
-                                }))
-                            ).map(item => (
-                              <div key={item.employeeId} className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-semibold text-[#334155]">{item.employeeName || 'Employee'}</span>
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  item.status === 'Completed' ? 'bg-[#F0FDF4] text-[#16A34A]' :
-                                  item.status === 'Pending Approval' ? 'bg-[#FFFBEB] text-[#D97706]' :
-                                  item.status === 'In Progress' ? 'bg-[#EFF6FF] text-[#2563EB]' :
-                                  'bg-[#F8FAFC] text-[#64748B]'
-                                }`}>
-                                  {item.status} {item.workDone ? `(${item.workDone}%)` : ''}
-                                </span>
+                                }));
+                            const selectedId = overviewIndividualEmployee[tId] || progressItems[0]?.employeeId;
+                            const selected = progressItems.find(item => item.employeeId === selectedId) || progressItems[0];
+
+                            if (!selected) {
+                              return <span className="text-[#94A3B8]">-</span>;
+                            }
+
+                            return (
+                              <div className="space-y-1 min-w-[150px]">
+                                {progressItems.length > 1 && (
+                                  <select
+                                    value={selected.employeeId}
+                                    onChange={(e) => setOverviewIndividualEmployee(prev => ({
+                                      ...prev,
+                                      [tId]: e.target.value
+                                    }))}
+                                    className="w-full px-2 py-1 bg-white border border-[#CBD5E1] rounded-md text-[11px] font-semibold text-[#334155] focus:outline-none focus:border-[#2563EB]"
+                                    title="Select employee to view individual status"
+                                  >
+                                    {progressItems.map(item => (
+                                      <option key={item.employeeId} value={item.employeeId}>
+                                        {item.employeeName || 'Employee'}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                                <div className="text-[11px] font-semibold text-[#334155]">
+                                  {selected.employeeName || 'Employee'} — {selected.status}
+                                </div>
                               </div>
-                            ))}
-                          </div>
+                            );
+                          })()}
                         </td>
                         <td className="p-3.5 font-extrabold text-[#2563EB]">{t.workDone || 0}%</td>
                         <td className="p-3.5">
