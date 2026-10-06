@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Mail, Phone, Calendar, Building, Shield, Save, Edit, X, Eye, EyeOff, Camera, Upload } from 'lucide-react';
@@ -29,17 +29,17 @@ const DirectorProfile: React.FC = () => {
   useEffect(() => {
     const loadEmployeeProfile = async () => {
       if (!user?.id) {
-        console.error('❌ User ID not found:', user);
+        console.error('âŒ User ID not found:', user);
         setError('User ID not found');
         setIsLoading(false);
         return;
       }
 
       try {
-        console.log('🔄 Loading director profile for user ID:', user.id);
+        console.log('ðŸ”„ Loading director profile for user ID:', user.id);
         // Pass email as fallback for non-ObjectId IDs (like mock users)
         const employeeData = await getEmployeeById(user.id, user.email);
-        console.log('✅ Director profile loaded:', employeeData);
+        console.log('âœ… Director profile loaded:', employeeData);
         setEmployee(employeeData);
         const profilePic = (employeeData as any).profilePicture || (employeeData as any).avatar || '';
         setProfilePicture(profilePic);
@@ -57,11 +57,11 @@ const DirectorProfile: React.FC = () => {
           profilePicture: profilePic
         });
       } catch (err: any) {
-        console.error('❌ Error loading director profile:', err);
+        console.error('âŒ Error loading director profile:', err);
         
         // If employee not found (404), create a fallback employee object from user data
         if (err.response?.status === 404 || err.message?.includes('not found')) {
-          console.log('⚠️ Employee not found in database, creating fallback from user data');
+          console.log('âš ï¸ Employee not found in database, creating fallback from user data');
           setIsFallbackData(true);
           const nameParts = user.name?.split(' ') || ['', ''];
           const fallbackEmployee: any = {
@@ -182,7 +182,7 @@ const DirectorProfile: React.FC = () => {
       } catch (updateErr: any) {
         // If update fails with 404, create new employee
         if (updateErr.response?.status === 404 || updateErr.message?.includes('not found')) {
-          console.log('⚠️ Employee not found, creating new employee record');
+          console.log('âš ï¸ Employee not found, creating new employee record');
           // Create new employee with required fields
           const newEmployeeData = {
             firstName: formData.firstName!,
@@ -224,7 +224,7 @@ const DirectorProfile: React.FC = () => {
       
       window.alert('Profile saved successfully!');
     } catch (err: any) {
-      console.error('❌ Error saving profile:', err);
+      console.error('âŒ Error saving profile:', err);
       window.alert(`Failed to save profile: ${err.response?.data?.message || err.message}`);
     } finally {
       setSaving(false);
@@ -373,68 +373,116 @@ const DirectorProfile: React.FC = () => {
     });
   };
 
+  const empAny = employee as any;
+  const fullName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim() || 'Director';
+  const initials = `${employee.firstName?.charAt(0) || ''}${employee.lastName?.charAt(0) || ''}`.toUpperCase() || 'D';
+  const avatarSrc = profilePicturePreview || profilePicture;
+  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/15';
+
+  const renderField = (
+    label: string,
+    icon: React.ReactNode,
+    value: React.ReactNode,
+    editor?: React.ReactNode
+  ) => (
+    <div className="group rounded-2xl border border-slate-100 bg-slate-50/70 p-4 transition hover:border-indigo-100 hover:bg-white hover:shadow-sm">
+      <p className="mb-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-white text-indigo-600 shadow-sm ring-1 ring-slate-100">
+          {icon}
+        </span>
+        {label}
+      </p>
+      {isEditing && editor ? editor : (
+        <div className="break-words pl-8 text-[15px] font-semibold text-slate-900">{value}</div>
+      )}
+    </div>
+  );
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '24px'
-    }}>
-      {/* Header */}
-      <div style={{
-        backgroundColor: '#ffffff',
-        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-        borderRadius: '8px',
-        padding: '24px'
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <div>
-            <h1 style={{
-              fontSize: '24px',
-              fontWeight: 'bold',
-              color: '#111827',
-              margin: 0
-            }}>My Profile</h1>
-            <p style={{
-              fontSize: '14px',
-              color: '#6b7280',
-              marginTop: '4px',
-              margin: 0
-            }}>
-              {isEditing ? 'Edit your personal and work information' : 'View and edit your personal and work information'}
-            </p>
+    <div className="space-y-6">
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#172554] via-[#1E40AF] to-[#7C3AED] shadow-xl shadow-indigo-900/20">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-fuchsia-400/30 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 left-1/3 h-64 w-64 rounded-full bg-cyan-300/25 blur-3xl" />
+
+        <div className="relative flex flex-col gap-6 p-6 sm:p-8 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
+            <div className="relative flex-shrink-0">
+              <div className="h-28 w-28 overflow-hidden rounded-full bg-gradient-to-br from-amber-300 via-pink-400 to-violet-500 p-[3px] shadow-lg">
+                <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#172554]">
+                  {avatarSrc ? (
+                    <img src={avatarSrc} alt="Profile" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-3xl font-black tracking-wide text-white">{initials}</span>
+                  )}
+                </div>
+              </div>
+              {isEditing && (
+                <div className="absolute -bottom-1 -right-1 flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-indigo-600 text-white shadow-md transition hover:bg-indigo-700"
+                    title="Upload Photo"
+                  >
+                    <Camera size={16} />
+                  </button>
+                  {avatarSrc && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveImage}
+                      className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-rose-500 text-white shadow-md transition hover:bg-rose-600"
+                      title="Remove Photo"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-200">My Profile</p>
+              <h1 className="mt-1 break-words text-3xl font-black text-white">{fullName}</h1>
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white ring-1 ring-white/25 backdrop-blur">
+                  <Shield size={13} />
+                  {empAny.position || employee.role}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-300/90 px-3 py-1 text-xs font-bold text-amber-950">
+                  <Building size={13} />
+                  {empAny.department || 'Management'}
+                </span>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
+                  employee.status === 'Active'
+                    ? 'bg-emerald-400/90 text-emerald-950'
+                    : employee.status === 'Absent'
+                      ? 'bg-amber-200 text-amber-900'
+                      : 'bg-rose-300 text-rose-950'
+                }`}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  {employee.status}
+                </span>
+              </div>
+              <p className="mt-3 flex items-center justify-center gap-1.5 break-all text-sm text-indigo-100 sm:justify-start">
+                <Mail size={14} className="flex-shrink-0" />
+                {employee.email}
+              </p>
+            </div>
           </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
+
+          <div className="flex flex-shrink-0 items-center justify-center gap-2">
             {!isEditing ? (
               <button
                 onClick={() => setIsEditing(true)}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#2563eb',
-                  color: '#ffffff',
-                  borderRadius: '8px',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  transition: 'background-color 0.2s ease'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.backgroundColor = '#1d4ed8';
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.backgroundColor = '#2563eb';
-                }}
+                className="inline-flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-indigo-700 shadow-lg transition hover:-translate-y-0.5 hover:bg-indigo-50"
               >
                 <Edit size={16} />
                 Edit Profile
@@ -444,31 +492,7 @@ const DirectorProfile: React.FC = () => {
                 <button
                   onClick={handleCancel}
                   disabled={saving}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#f3f4f6',
-                    color: '#374151',
-                    borderRadius: '8px',
-                    border: 'none',
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'background-color 0.2s ease',
-                    opacity: saving ? 0.5 : 1
-                  }}
-                  onMouseOver={(e) => {
-                    if (!saving) {
-                      e.currentTarget.style.backgroundColor = '#e5e7eb';
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    if (!saving) {
-                      e.currentTarget.style.backgroundColor = '#f3f4f6';
-                    }
-                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-bold text-white ring-1 ring-white/30 transition hover:bg-white/25 disabled:opacity-50"
                 >
                   <X size={16} />
                   Cancel
@@ -476,31 +500,7 @@ const DirectorProfile: React.FC = () => {
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#10b981',
-                    color: '#ffffff',
-                    borderRadius: '8px',
-                    border: 'none',
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'background-color 0.2s ease',
-                    opacity: saving ? 0.5 : 1
-                  }}
-                  onMouseOver={(e) => {
-                    if (!saving) {
-                      e.currentTarget.style.backgroundColor = '#059669';
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    if (!saving) {
-                      e.currentTarget.style.backgroundColor = '#10b981';
-                    }
-                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-2.5 text-sm font-bold text-emerald-950 shadow-lg transition hover:bg-emerald-300 disabled:opacity-50"
                 >
                   <Save size={16} />
                   {saving ? 'Saving...' : 'Save Changes'}
@@ -511,576 +511,76 @@ const DirectorProfile: React.FC = () => {
         </div>
       </div>
 
-      {/* Warning Banner for Fallback Data */}
       {isFallbackData && (
-        <div style={{
-          backgroundColor: '#fef3c7',
-          border: '1px solid #fbbf24',
-          borderRadius: '8px',
-          padding: '16px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
-          <Shield size={20} color="#92400e" />
-          <div style={{ flex: 1 }}>
-            <h3 style={{
-              fontSize: '14px',
-              fontWeight: '600',
-              color: '#92400e',
-              margin: 0,
-              marginBottom: '4px'
-            }}>
-              Profile Not Found in Database
-            </h3>
-            <p style={{
-              fontSize: '13px',
-              color: '#b45309',
-              margin: 0
-            }}>
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <Shield size={20} className="mt-0.5 flex-shrink-0 text-amber-700" />
+          <div>
+            <h3 className="text-sm font-bold text-amber-900">Profile Not Found in Database</h3>
+            <p className="mt-0.5 text-[13px] text-amber-800">
               Your profile information is being loaded from your account. Please fill in your details and save to create your employee profile in the system.
             </p>
           </div>
         </div>
       )}
 
-      {/* Profile Picture Section */}
-      <div style={{
-        backgroundColor: '#ffffff',
-        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-        borderRadius: '8px',
-        padding: '24px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '16px'
-      }}>
-        <h2 style={{
-          fontSize: '18px',
-          fontWeight: '600',
-          color: '#111827',
-          margin: 0,
-          width: '100%',
-          textAlign: 'left'
-        }}>
-          Profile Picture
-        </h2>
-        <div style={{
-          position: 'relative',
-          display: 'inline-block'
-        }}>
-          <div style={{
-            width: '120px',
-            height: '120px',
-            borderRadius: '50%',
-            backgroundColor: '#e5e7eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            border: '3px solid #ffffff',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
-          }}>
-            {profilePicturePreview || profilePicture ? (
-              <img 
-                src={profilePicturePreview || profilePicture} 
-                alt="Profile" 
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover'
-                }}
-              />
-            ) : (
-              <User size={48} color="#9ca3af" />
-            )}
-          </div>
-          {isEditing && (
-            <div style={{
-              position: 'absolute',
-              bottom: '0',
-              right: '0',
-              display: 'flex',
-              gap: '4px'
-            }}>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  backgroundColor: '#2563eb',
-                  color: '#ffffff',
-                  border: '2px solid #ffffff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-                  transition: 'background-color 0.2s ease'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.backgroundColor = '#1d4ed8';
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.backgroundColor = '#2563eb';
-                }}
-                title="Upload Photo"
-              >
-                <Camera size={18} />
-              </button>
-              {profilePicturePreview && (
-                <button
-                  type="button"
-                  onClick={handleRemoveImage}
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    backgroundColor: '#ef4444',
-                    color: '#ffffff',
-                    border: '2px solid #ffffff',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-                    transition: 'background-color 0.2s ease'
-                  }}
-                  onMouseOver={(e) => {
-                    e.currentTarget.style.backgroundColor = '#dc2626';
-                  }}
-                  onMouseOut={(e) => {
-                    e.currentTarget.style.backgroundColor = '#ef4444';
-                  }}
-                  title="Remove Photo"
-                >
-                  <X size={18} />
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleImageUpload}
-          style={{ display: 'none' }}
-        />
-        {!isEditing && (
-          <p style={{
-            fontSize: '14px',
-            color: '#6b7280',
-            margin: 0,
-            textAlign: 'center'
-          }}>
-            Click &quot;Edit Profile&quot; to change your profile picture
-          </p>
-        )}
-        {isEditing && (
-          <p style={{
-            fontSize: '14px',
-            color: '#6b7280',
-            margin: 0,
-            textAlign: 'center'
-          }}>
-            Click the camera icon to upload a new profile picture (Max 5MB)
-          </p>
-        )}
-      </div>
+      {isEditing && (
+        <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2.5 text-xs font-semibold text-indigo-800">
+          Use the camera icon on your photo to upload a new profile picture (max 5MB). Fields marked * are required.
+        </p>
+      )}
 
-      {/* Profile Information */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-        gap: '24px'
-      }}>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Personal Information */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-          borderRadius: '8px',
-          padding: '24px'
-        }}>
-          <h2 style={{
-            fontSize: '18px',
-            fontWeight: '600',
-            color: '#111827',
-            marginBottom: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <User size={20} color="#3b82f6" />
-            Personal Information
-          </h2>
-          
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px'
-          }}>
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 via-white to-white px-6 py-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-md shadow-indigo-500/30">
+              <User size={19} />
+            </span>
             <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                First Name *
-              </label>
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={formData.firstName || ''}
-                  onChange={(e) => handleInputChange('firstName', e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    outline: 'none',
-                    fontSize: '14px',
-                    fontFamily: 'inherit'
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#3b82f6';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  required
-                />
-              ) : (
-                <div style={{
-                  fontSize: '16px',
-                  color: '#111827',
-                  padding: '8px 0'
-                }}>
-                  {employee.firstName}
-                </div>
-              )}
+              <h2 className="text-base font-black text-slate-900">Personal Information</h2>
+              <p className="text-xs text-slate-500">Your name and contact details</p>
             </div>
-
-            <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                Last Name *
-              </label>
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={formData.lastName || ''}
-                  onChange={(e) => handleInputChange('lastName', e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    outline: 'none',
-                    fontSize: '14px',
-                    fontFamily: 'inherit'
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#3b82f6';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  required
-                />
-              ) : (
-                <div style={{
-                  fontSize: '16px',
-                  color: '#111827',
-                  padding: '8px 0'
-                }}>
-                  {employee.lastName}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                <Mail size={16} color="#6b7280" />
-                Email Address *
-              </label>
-              {isEditing ? (
-                <input
-                  type="email"
-                  value={formData.email || ''}
-                  onChange={(e) => handleInputChange('email', e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    outline: 'none',
-                    fontSize: '14px',
-                    fontFamily: 'inherit'
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#3b82f6';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  required
-                />
-              ) : (
-                <div style={{
-                  fontSize: '16px',
-                  color: '#111827',
-                  padding: '8px 0'
-                }}>
-                  {employee.email}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                <Phone size={16} color="#6b7280" />
-                Phone Number *
-              </label>
-              {isEditing ? (
-                <input
-                  type="tel"
-                  value={formData.phone || ''}
-                  onChange={(e) => handleInputChange('phone', e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    outline: 'none',
-                    fontSize: '14px',
-                    fontFamily: 'inherit'
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#3b82f6';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  required
-                />
-              ) : (
-                <div style={{
-                  fontSize: '16px',
-                  color: '#111827',
-                  padding: '8px 0'
-                }}>
-                  {(employee as any).phone || 'N/A'}
-                </div>
-              )}
-            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+            {renderField('First Name *', <User size={13} />, employee.firstName, (
+              <input type="text" value={formData.firstName || ''} onChange={(e) => handleInputChange('firstName', e.target.value)} className={inputClass} required />
+            ))}
+            {renderField('Last Name *', <User size={13} />, employee.lastName, (
+              <input type="text" value={formData.lastName || ''} onChange={(e) => handleInputChange('lastName', e.target.value)} className={inputClass} required />
+            ))}
+            {renderField('Email Address *', <Mail size={13} />, employee.email, (
+              <input type="email" value={formData.email || ''} onChange={(e) => handleInputChange('email', e.target.value)} className={inputClass} required />
+            ))}
+            {renderField('Phone Number *', <Phone size={13} />, empAny.phone || 'N/A', (
+              <input type="tel" value={formData.phone || ''} onChange={(e) => handleInputChange('phone', e.target.value)} className={inputClass} required />
+            ))}
           </div>
         </div>
 
         {/* Work Information */}
-        <div style={{
-          backgroundColor: '#ffffff',
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-          borderRadius: '8px',
-          padding: '24px'
-        }}>
-          <h2 style={{
-            fontSize: '18px',
-            fontWeight: '600',
-            color: '#111827',
-            marginBottom: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <Building size={20} color="#3b82f6" />
-            Work Information
-          </h2>
-          
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px'
-          }}>
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-violet-50 via-white to-white px-6 py-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-md shadow-violet-500/30">
+              <Building size={19} />
+            </span>
             <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                Designation (Position) *
-              </label>
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={formData.position || ''}
-                  onChange={(e) => handleInputChange('position', e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    outline: 'none',
-                    fontSize: '14px',
-                    fontFamily: 'inherit'
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#3b82f6';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                  placeholder="Enter your designation"
-                  required
-                />
-              ) : (
-                <div style={{
-                  fontSize: '16px',
-                  color: '#111827',
-                  padding: '8px 0'
-                }}>
-                  {(employee as any).position || employee.role}
-                </div>
-              )}
+              <h2 className="text-base font-black text-slate-900">Work Information</h2>
+              <p className="text-xs text-slate-500">Role, department and account</p>
             </div>
-
-            <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                Department
-              </label>
-              <div style={{
-                fontSize: '16px',
-                color: '#111827',
-                padding: '8px 0'
-              }}>
-                {(employee as any).department || 'Management'}
-              </div>
-            </div>
-
-            <div>
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                <Calendar size={16} color="#6b7280" />
-                Joining Date
-              </label>
-              <div style={{
-                fontSize: '16px',
-                color: '#111827',
-                padding: '8px 0'
-              }}>
-                {formatDate((employee as any).joiningDate || new Date().toISOString())}
-              </div>
-            </div>
-
-            <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                Status
-              </label>
-              <span style={{
-                padding: '4px 12px',
-                borderRadius: '9999px',
-                fontSize: '14px',
-                fontWeight: '500',
-                ...getStatusColor(employee.status)
-              }}>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+            {renderField('Designation *', <Shield size={13} />, empAny.position || employee.role, (
+              <input type="text" value={formData.position || ''} onChange={(e) => handleInputChange('position', e.target.value)} className={inputClass} placeholder="Enter your designation" required />
+            ))}
+            {renderField('Department', <Building size={13} />, empAny.department || 'Management')}
+            {renderField('Joining Date', <Calendar size={13} />, formatDate(empAny.joiningDate || new Date().toISOString()))}
+            {renderField('Status', <Shield size={13} />, (
+              <span className="inline-flex rounded-full px-3 py-0.5 text-xs font-bold" style={getStatusColor(employee.status)}>
                 {employee.status}
               </span>
-            </div>
-
-            <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                Username
-              </label>
-              <div style={{
-                fontSize: '16px',
-                color: '#111827',
-                padding: '8px 0'
-              }}>
-                {(employee as any).username || employee.email.split('@')[0]}
-              </div>
-            </div>
-
-            <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
-                marginBottom: '8px'
-              }}>
-                Role
-              </label>
-              <div style={{
-                fontSize: '16px',
-                color: '#111827',
-                padding: '8px 0',
-                fontWeight: '500'
-              }}>
-                {employee.role}
-              </div>
-            </div>
+            ))}
+            {renderField('Username', <User size={13} />, empAny.username || employee.email.split('@')[0])}
+            {renderField('Role', <Shield size={13} />, employee.role)}
           </div>
         </div>
       </div>

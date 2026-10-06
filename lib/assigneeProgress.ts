@@ -115,5 +115,6 @@ export function serializeTaskWithAssignees(task: any) {
     assignedEmployeeIds.length <= 1 ? (obj.workDone || 0) : 0
   )
   if (obj._id && !obj.id) obj.id = obj._id.toString()
+  if (obj.parentTaskId) obj.parentTaskId = String(obj.parentTaskId)
   return obj
 }

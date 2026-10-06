@@ -30,6 +30,7 @@ import {
   formatHoursMinutes
 } from './BadgeUtils';
 import { isOngoingProjectStatus } from '@/lib/projectStatus';
+import { groupItemsByProject } from '@/lib/taskHierarchy';
 import {
   FolderOpen,
   CheckSquare,
@@ -57,8 +58,7 @@ import {
   ArrowRight,
   FileText,
   CalendarCheck,
-  AlertCircle,
-  Filter
+  AlertCircle
 } from 'lucide-react';
 
 const FLAG_TYPES = [
@@ -242,7 +242,12 @@ const Dashboard: React.FC = () => {
     upcomingProjects: projects.filter(p => p.status === 'Upcoming').length,
     sleepingProjects: projects.filter(p => p.status === 'Sleeping (On Hold)').length,
     completedProjects: projects.filter(p => p.status === 'Completed').length,
-    totalEmployees: employees.length,
+    totalEmployees: new Set(
+      employees
+        .filter(e => String(e.status || 'Active') !== 'Inactive')
+        .map(e => String(e.id || e._id || e.email || ''))
+        .filter(Boolean)
+    ).size,
     currentTasks: tasks.filter(t => ['Pending', 'In Progress'].includes(t.status)).length,
     pendingApprovals: tasks.filter(t => t.status === 'Pending Approval' || t.workDone === 100).length,
     overdueTasks: tasks.filter(t => Boolean(t.dueDate && t.dueDate < todayDateStr && t.status !== 'Completed')).length,
@@ -486,6 +491,7 @@ const Dashboard: React.FC = () => {
         });
       }
       await reloadProjects();
+      if (isEdit) await fetchData();
     } catch (err: any) {
       throw err;
     }
@@ -499,21 +505,50 @@ const Dashboard: React.FC = () => {
 
       if (!isEdit && selectedProjectTasks.length > 0) {
         const extraTitle = typeof taskData.title === 'string' ? taskData.title.trim() : '';
-        const payloads = [...selectedProjectTasks];
-        if (extraTitle && !payloads.some((item: any) => String(item.title || '').trim().toLowerCase() === extraTitle.toLowerCase())) {
+        let parentId = taskData.parentTaskId ? String(taskData.parentTaskId) : '';
+
+        if (!parentId && extraTitle) {
+          const parentRes = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: extraTitle,
+              description: taskData.description || extraTitle,
+              projectId: taskData.projectId,
+              priority: taskData.priority,
+              assignedEmployeeIds: taskData.assignedEmployeeIds,
+              reminderDate: taskData.reminderDate,
+              dueDate: taskData.dueDate || taskData.reminderDate
+            })
+          });
+          if (!parentRes.ok) {
+            const data = await parentRes.json();
+            throw new Error(data.error || 'Failed to save parent task');
+          }
+          const parentTask = await parentRes.json();
+          parentId = String(parentTask.id || parentTask._id || '');
+        }
+
+        let payloads = [...selectedProjectTasks];
+        if (extraTitle && parentId && !taskData.parentTaskId) {
+          payloads = payloads.filter((item: any) => String(item.title || '').trim().toLowerCase() !== extraTitle.toLowerCase());
+        } else if (extraTitle && !payloads.some((item: any) => String(item.title || '').trim().toLowerCase() === extraTitle.toLowerCase())) {
           payloads.push({ title: extraTitle });
         }
+
         for (const item of payloads) {
           const res = await fetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               title: item.title,
-              description: taskData.description || item.title,
+              description: String(item.requirement || '').trim() || taskData.description || item.title,
               projectId: taskData.projectId,
               priority: taskData.priority,
               assignedEmployeeIds: taskData.assignedEmployeeIds,
-              reminderDate: taskData.reminderDate
+              reminderDate: taskData.reminderDate,
+              dueDate: taskData.dueDate || taskData.reminderDate,
+              parentTaskId: parentId || undefined
             })
           });
           if (!res.ok) {
@@ -575,10 +610,14 @@ const Dashboard: React.FC = () => {
   const completedTasks = tasks.filter(t => t.status === 'Completed');
   const activeTasks = tasks.filter(t => ['Pending', 'In Progress'].includes(t.status));
 
-  // My Tasks (Assigned to logged in Director)
+  // My Tasks: active/incomplete work assigned to the logged-in Director
   const myDirectorTasks = tasks.filter(t => {
     const uId = user?.id || (user as any)?._id || '';
-    return t.assignedEmployeeIds?.includes(uId) || t.assignedById === uId;
+    if (!uId) return false;
+    const assignedToMe = Array.isArray(t.assignedEmployeeIds) && t.assignedEmployeeIds.includes(uId);
+    if (!assignedToMe) return false;
+    const status = String(t.status || '').trim();
+    return !['Completed', 'Closed', 'Cancelled'].includes(status);
   });
 
   // Filtered views
@@ -595,7 +634,9 @@ const Dashboard: React.FC = () => {
 
   const filteredTasks = tasks.filter(t => {
     if (taskPriorityFilter !== 'all' && t.priority !== taskPriorityFilter) return false;
-    if (taskStatusFilter !== 'all' && t.status !== taskStatusFilter) return false;
+    if (taskStatusFilter === 'current') {
+      if (!['Pending', 'In Progress'].includes(t.status)) return false;
+    } else if (taskStatusFilter !== 'all' && t.status !== taskStatusFilter) return false;
     if (taskSearch && !t.title.toLowerCase().includes(taskSearch.toLowerCase()) && !(t.projectName || '').toLowerCase().includes(taskSearch.toLowerCase())) return false;
     return true;
   });
@@ -614,6 +655,46 @@ const Dashboard: React.FC = () => {
     if (boardSearch && !entry.taskTitle.toLowerCase().includes(boardSearch.toLowerCase()) && !(entry.actionTaken || '').toLowerCase().includes(boardSearch.toLowerCase())) return false;
     return true;
   });
+
+  const boardTotalHours = filteredDailyBoard.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+  const boardFlaggedCount = filteredDailyBoard.filter(entry => entry.flagged).length;
+  const boardCompletedCount = filteredDailyBoard.filter(entry => entry.status === 'Completed').length;
+  const boardEmployeeCount = new Set(filteredDailyBoard.map(entry => entry.employeeId)).size;
+  const boardFiltersActive = Boolean(
+    boardSearch || boardDateFilter || boardEmployeeFilter !== 'all' || boardProjectFilter !== 'all' || boardStatusFilter !== 'all'
+  );
+  const formatBoardDay = (dateStr: string) => {
+    const d = new Date(`${String(dateStr || '').substring(0, 10)}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return dateStr || '-';
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+  const formatBoardWeekday = (dateStr: string) => {
+    const d = new Date(`${String(dateStr || '').substring(0, 10)}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { weekday: 'long' });
+  };
+
+  const groupedDailyBoard = groupItemsByProject(
+    filteredDailyBoard.map(entry => ({
+      ...entry,
+      projectId: entry.projectId,
+      projectName: entry.projectName || 'Project',
+      hours: entry.hours
+    }))
+  );
+  const groupedDirectorTasks = groupItemsByProject(
+    myDirectorTasks.map(t => ({
+      ...t,
+      projectId: t.projectId,
+      projectName: t.projectName || 'Project'
+    }))
+  );
+  const groupedFilteredTasks = groupItemsByProject(
+    filteredTasks.map(t => ({
+      ...t,
+      projectId: t.projectId,
+      projectName: t.projectName || 'Project'
+    }))
+  );
 
   // Filtered Daily Reports
   const filteredDailyReports = dailyEntries.filter(entry => {
@@ -887,10 +968,71 @@ const Dashboard: React.FC = () => {
               </div>
             )}
 
-            {/* 10 STATS SUMMARY CARDS GRID */}
+            {/* Director: 4 workflow cards. Project Head keeps the full stats grid. */}
             {loading ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {[...Array(10)].map((_, i) => <SkeletonCard key={i} />)}
+              <div className={isDirector
+                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'
+                : 'grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4'}
+              >
+                {[...Array(isDirector ? 4 : 10)].map((_, i) => <SkeletonCard key={i} />)}
+              </div>
+            ) : isDirector ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <button
+                  onClick={() => setActiveTab('my-tasks')}
+                  className="text-left h-full bg-white p-5 rounded-[14px] border border-[#E2E8F0] shadow-xs hover:border-[#2563EB] hover:shadow-md transition cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between text-[#64748B] mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB]">My Tasks</span>
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2563EB] flex items-center justify-center group-hover:bg-[#2563EB] group-hover:text-white transition">
+                      <CheckSquare size={16} />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-extrabold text-[#2563EB]">{myDirectorTasks.length}</p>
+                  <p className="text-[11px] text-[#94A3B8] mt-0.5">Assigned to me</p>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('tasks'); setTaskStatusFilter('Pending Approval'); }}
+                  className="text-left h-full bg-white p-5 rounded-[14px] border border-[#E2E8F0] shadow-xs hover:border-[#D97706] hover:shadow-md transition cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between text-[#64748B] mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#D97706]">Pending Approvals</span>
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 text-[#D97706] flex items-center justify-center group-hover:bg-[#D97706] group-hover:text-white transition">
+                      <Clock size={16} />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-extrabold text-[#D97706]">{stats.pendingApprovals}</p>
+                  <p className="text-[11px] text-[#94A3B8] mt-0.5">100% completion pending</p>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('tasks')}
+                  className="text-left h-full bg-white p-5 rounded-[14px] border border-[#E2E8F0] shadow-xs hover:border-[#DC2626] hover:shadow-md transition cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between text-[#64748B] mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#DC2626]">Overdue Tasks</span>
+                    <div className="w-8 h-8 rounded-lg bg-rose-50 text-[#DC2626] flex items-center justify-center group-hover:bg-[#DC2626] group-hover:text-white transition">
+                      <AlertTriangle size={16} />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-extrabold text-[#DC2626]">{stats.overdueTasks}</p>
+                  <p className="text-[11px] text-[#94A3B8] mt-0.5">Past due date</p>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('flags')}
+                  className="text-left h-full bg-white p-5 rounded-[14px] border border-[#E2E8F0] shadow-xs hover:border-[#DC2626] hover:shadow-md transition cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between text-[#64748B] mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#DC2626]">Open Flags</span>
+                    <div className="w-8 h-8 rounded-lg bg-rose-50 text-[#DC2626] flex items-center justify-center group-hover:bg-[#DC2626] group-hover:text-white transition">
+                      <FlagIcon size={16} className="fill-current" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-extrabold text-[#DC2626]">{stats.openFlags}</p>
+                  <p className="text-[11px] text-[#94A3B8] mt-0.5">Requires guidance</p>
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -1110,27 +1252,57 @@ const Dashboard: React.FC = () => {
 
         {/* TAB 2: DAILY TASK BOARD */}
         {activeTab === 'today-work' && (
-          <div className="bg-white rounded-[14px] border border-[#E2E8F0] p-6 shadow-xs space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-[#E2E8F0] gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-[#0F172A]">Daily Task Board</h3>
-                <p className="text-xs text-[#64748B]">Real-time daily work entries submitted by employees across projects</p>
+          <div className="space-y-5 min-w-0">
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0F172A] via-[#1E3A8A] to-[#2563EB] p-6 text-white shadow-lg">
+              <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
+              <div className="pointer-events-none absolute -bottom-16 left-1/3 h-48 w-48 rounded-full bg-sky-400/20 blur-3xl" />
+              <div className="relative flex flex-col gap-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/25">
+                    <CalendarCheck size={22} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xl font-extrabold tracking-tight">Daily Task Board</h3>
+                    <p className="text-xs font-medium text-blue-100">Real-time daily work entries submitted by employees across projects</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  {[
+                    { label: 'Entries', value: String(filteredDailyBoard.length), sub: `${boardEmployeeCount} employee${boardEmployeeCount === 1 ? '' : 's'}`, icon: <FileText size={16} />, tint: 'bg-sky-400/20 text-sky-100' },
+                    { label: 'Total Time', value: formatHoursMinutes(boardTotalHours), sub: 'hours logged', icon: <Clock size={16} />, tint: 'bg-emerald-400/20 text-emerald-100' },
+                    { label: 'Flagged', value: String(boardFlaggedCount), sub: 'need attention', icon: <FlagIcon size={16} />, tint: 'bg-orange-400/25 text-orange-100' },
+                    { label: 'Completed', value: String(boardCompletedCount), sub: `of ${filteredDailyBoard.length} entries`, icon: <CheckCircle2 size={16} />, tint: 'bg-violet-400/25 text-violet-100' }
+                  ].map(card => (
+                    <div key={card.label} className="rounded-xl bg-white/10 p-3.5 ring-1 ring-white/15 backdrop-blur-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-blue-100">{card.label}</span>
+                        <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${card.tint}`}>{card.icon}</span>
+                      </div>
+                      <p className="mt-1.5 text-2xl font-extrabold leading-none">{card.value}</p>
+                      <p className="mt-1 text-[11px] font-medium text-blue-100/90">{card.sub}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
+            </div>
 
-              {/* Filters */}
+            <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-xs">
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Search task or action..."
-                  value={boardSearch}
-                  onChange={(e) => setBoardSearch(e.target.value)}
-                  className="px-3 py-1.5 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs w-40 focus:outline-none focus:border-[#2563EB]"
-                />
+                <div className="relative min-w-[200px] flex-1">
+                  <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search task or action..."
+                    value={boardSearch}
+                    onChange={(e) => setBoardSearch(e.target.value)}
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] py-2 pl-9 pr-3 text-xs font-medium text-[#0F172A] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
 
                 <select
                   value={boardEmployeeFilter}
                   onChange={(e) => setBoardEmployeeFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
+                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
                 >
                   <option value="all">All Employees</option>
                   {employees.map(e => (
@@ -1141,7 +1313,7 @@ const Dashboard: React.FC = () => {
                 <select
                   value={boardProjectFilter}
                   onChange={(e) => setBoardProjectFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
+                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
                 >
                   <option value="all">All Projects</option>
                   {projects.map(p => (
@@ -1153,77 +1325,157 @@ const Dashboard: React.FC = () => {
                   type="date"
                   value={boardDateFilter}
                   onChange={(e) => setBoardDateFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
+                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
                 />
 
                 <select
                   value={boardStatusFilter}
                   onChange={(e) => setBoardStatusFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
+                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
                 >
                   <option value="all">All Statuses</option>
                   <option value="Completed">Completed</option>
                   <option value="In Progress">In Progress</option>
                   <option value="Pending">Pending</option>
                 </select>
+
+                {boardFiltersActive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBoardSearch('');
+                      setBoardDateFilter('');
+                      setBoardEmployeeFilter('all');
+                      setBoardProjectFilter('all');
+                      setBoardStatusFilter('all');
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    <RotateCcw size={13} />
+                    Reset
+                  </button>
+                )}
               </div>
             </div>
 
             {filteredDailyBoard.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 space-y-2">
-                <CalendarCheck size={36} className="mx-auto text-slate-300" />
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center space-y-2">
+                <CalendarCheck size={40} className="mx-auto text-slate-300" />
                 <p className="text-sm font-bold text-[#0F172A]">No daily work entries found matching filters.</p>
+                <p className="text-xs text-[#64748B]">Entries appear here as soon as employees submit their daily work.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-[#F8FAFC] text-[#64748B] uppercase font-bold text-[11px] border-b border-[#E2E8F0] sticky top-0 z-10">
-                      <th className="p-3.5 w-[10%]">Project</th>
-                      <th className="p-3.5 w-[15%]">Task</th>
-                      <th className="p-3.5 w-[15%]">Description</th>
-                      <th className="p-3.5 w-[36%] bg-emerald-50 text-emerald-950 border-x border-emerald-200">Action Taken</th>
-                      <th className="p-3.5 w-[10%]">Employee</th>
-                      <th className="p-3.5 w-[8%] text-center">Date</th>
-                      <th className="p-3.5 w-[8%] text-center bg-emerald-50 text-emerald-950 border-x border-emerald-200">Time Spent</th>
-                      <th className="p-3.5 w-[10%] text-center">Flag</th>
-                      <th className="p-3.5 w-[8%] text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E2E8F0]">
-                    {filteredDailyBoard.map(entry => (
-                      <tr key={entry.id || entry._id} className="hover:bg-[#F8FAFC] transition">
-                        <td className="p-3.5 font-bold text-[#0F172A] align-top">{entry.projectName}</td>
-                        <td className="p-3.5 font-semibold text-[#0F172A] align-top">{entry.taskTitle}</td>
-                        <td className="p-3.5 text-[#64748B] align-top">{entry.details || '-'}</td>
-                        <td className="p-3.5 text-[#0F172A] font-medium bg-emerald-50/30 border-x border-emerald-100 align-top whitespace-pre-wrap">{entry.actionTaken}</td>
-                        <td className="p-3.5 font-bold text-[#334155] align-top">{entry.employeeName}</td>
-                        <td className="p-3.5 text-center font-semibold text-[#64748B] whitespace-nowrap align-top">{entry.date}</td>
-                        <td className="p-3.5 text-center font-extrabold text-[#2563EB] bg-emerald-50/30 border-x border-emerald-100 whitespace-nowrap align-top">{formatHoursMinutes(entry.hours)}</td>
-                        <td className="p-3.5 text-center align-top">
-                          {entry.flagged ? (
-                            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-900 border border-amber-300" title={entry.flagComment || 'Flagged'}>
-                              Yes{entry.flagComment ? ` (${entry.flagComment})` : ''}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">No</span>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-center align-top">
-                          <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
-                            entry.status === 'Completed'
-                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                              : entry.status === 'In Progress'
-                                ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                : 'bg-slate-100 text-slate-700 border-slate-300'
-                          }`}>
-                            {entry.status || 'Submitted'}
-                          </span>
-                        </td>
+              <div className="overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-sm">
+                <div className="max-h-[680px] overflow-auto">
+                  <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-xs">
+                    <colgroup>
+                      <col className="w-[15%]" />
+                      <col className="w-[17%]" />
+                      <col className="w-[20%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[16%]" />
+                    </colgroup>
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-[#1E3A8A] text-[11px] font-bold uppercase tracking-wider text-white">
+                        <th className="px-4 py-3">Task</th>
+                        <th className="px-4 py-3">Description</th>
+                        <th className="px-4 py-3 bg-[#047857]">Action Taken</th>
+                        <th className="px-4 py-3">Employee</th>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3 text-center bg-[#047857]">Time</th>
+                        <th className="px-4 py-3">Flag &amp; Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {groupedDailyBoard.map(group => {
+                        const groupHours = group.items.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+                        return (
+                          <React.Fragment key={group.projectId || group.projectName}>
+                            <tr className="bg-gradient-to-r from-[#DBEAFE] to-[#EEF2FF]">
+                              <td colSpan={7} className="px-4 py-2.5 border-y border-blue-200">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <FolderOpen size={15} className="text-[#1D4ED8]" />
+                                    <span className="text-sm font-extrabold text-[#1E3A8A]">{group.projectName}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[11px] font-bold">
+                                    <span className="rounded-full bg-white px-2.5 py-0.5 text-[#1D4ED8] ring-1 ring-blue-200">
+                                      {group.items.length} {group.items.length === 1 ? 'entry' : 'entries'}
+                                    </span>
+                                    <span className="rounded-full bg-white px-2.5 py-0.5 text-emerald-700 ring-1 ring-emerald-200">
+                                      {formatHoursMinutes(groupHours)} hrs
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                            {group.items.map(entry => (
+                              <tr
+                                key={entry.id || entry._id}
+                                className={`border-b border-[#E2E8F0] align-top transition hover:bg-slate-50 ${entry.flagged ? 'bg-orange-50/60' : 'bg-white'}`}
+                              >
+                                <td className={`px-4 py-3.5 ${entry.flagged ? 'border-l-4 border-l-orange-400' : 'border-l-4 border-l-transparent'}`}>
+                                  <p className="break-words text-[13px] font-bold text-[#0F172A]">- {entry.taskTitle}</p>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <p className="whitespace-pre-wrap break-words leading-relaxed text-[#64748B]">{entry.details || '-'}</p>
+                                </td>
+                                <td className="px-4 py-3.5 bg-emerald-50/50">
+                                  <p className="whitespace-pre-wrap break-words font-semibold leading-relaxed text-[#064E3B]">{entry.actionTaken || '-'}</p>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <EmployeeAvatar name={entry.employeeName || 'Staff'} size="sm" />
+                                    <span className="truncate font-bold text-[#334155]">{entry.employeeName || '-'}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <p className="whitespace-nowrap font-bold text-[#0F172A]">{formatBoardDay(entry.date)}</p>
+                                  <p className="text-[11px] font-medium text-[#94A3B8]">{formatBoardWeekday(entry.date)}</p>
+                                </td>
+                                <td className="px-4 py-3.5 text-center bg-emerald-50/50">
+                                  <span className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2 py-1 text-xs font-extrabold text-white shadow-xs">
+                                    <Clock size={12} />
+                                    {formatHoursMinutes(entry.hours)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <div className="flex flex-col items-start gap-1.5">
+                                    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${
+                                      entry.status === 'Completed'
+                                        ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                                        : entry.status === 'In Progress'
+                                          ? 'border-blue-300 bg-blue-100 text-blue-800'
+                                          : 'border-slate-300 bg-slate-100 text-slate-700'
+                                    }`}>
+                                      {entry.status === 'Completed' ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                                      {entry.status || 'Submitted'}
+                                    </span>
+                                    {entry.flagged ? (
+                                      <div className="w-full rounded-lg border border-orange-300 bg-orange-100/80 px-2 py-1.5">
+                                        <span className="flex items-center gap-1 text-[11px] font-extrabold text-orange-800">
+                                          <FlagIcon size={12} />
+                                          Flagged
+                                        </span>
+                                        {entry.flagComment && (
+                                          <p className="mt-0.5 break-words text-[11px] font-medium leading-snug text-orange-900">{entry.flagComment}</p>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[11px] font-semibold text-slate-400">No flag</span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
@@ -1252,29 +1504,19 @@ const Dashboard: React.FC = () => {
                 <p className="text-sm font-bold text-[#0F172A]">No tasks directly assigned to you.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {myDirectorTasks.map(t => (
-                  <div key={t.id || t._id} className="border border-[#E2E8F0] rounded-xl p-4 bg-white shadow-xs space-y-3">
-                    <div className="flex justify-between items-center">
-                      <PriorityBadge priority={t.priority} />
-                      <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-700">
-                        {t.status}
-                      </span>
-                    </div>
-
-                    <h4 className="font-bold text-[#0F172A] text-sm">{t.title}</h4>
-                    <p className="text-xs text-[#64748B]">Project: <span className="font-semibold text-[#334155]">{t.projectName}</span></p>
-                    <p className="text-xs text-[#475569]">{t.description}</p>
-                    
-                    <div>
-                      <div className="flex justify-between text-[11px] mb-1 font-semibold text-[#64748B]">
-                        <span>Progress</span>
-                        <span className="text-[#2563EB] font-bold">{t.workDone || 0}%</span>
-                      </div>
-                      <div className="w-full bg-[#E2E8F0] rounded-full h-2">
-                        <div className="bg-[#2563EB] h-2 rounded-full" style={{ width: `${t.workDone || 0}%` }} />
-                      </div>
-                    </div>
+              <div className="space-y-6">
+                {groupedDirectorTasks.map(group => (
+                  <div key={group.projectId} className="space-y-2">
+                    <h4 className="text-sm font-bold text-[#0F172A]">{group.projectName}</h4>
+                    <ul className="space-y-1">
+                      {group.items.map(t => (
+                        <li key={t.id || t._id} className="flex items-start gap-2 text-sm text-[#334155]">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#2563EB] flex-shrink-0" />
+                          <span className="flex-1">{t.title}</span>
+                          <span className="text-[10px] font-bold rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">{t.status}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ))}
               </div>
@@ -1656,71 +1898,6 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 8: MY PERFORMANCE */}
-        {activeTab === 'performance' && (
-          <div className="bg-white rounded-[14px] border border-[#E2E8F0] p-6 shadow-xs space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-[#E2E8F0] gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-[#0F172A]">My Performance Metrics</h3>
-                <p className="text-xs text-[#64748B]">Real-time activity stats &amp; management output filtered by custom date range</p>
-              </div>
-
-              {/* Calendar Date Range Selector */}
-              <div className="flex items-center gap-2 bg-[#F8FAFC] border border-[#CBD5E1] p-1.5 rounded-xl text-xs">
-                <div className="flex items-center gap-1.5">
-                  <label className="text-[10px] font-bold text-[#64748B] uppercase">Start Date:</label>
-                  <input
-                    type="date"
-                    value={dashPerfStartDate}
-                    onChange={(e) => setDashPerfStartDate(e.target.value)}
-                    className="bg-white border border-[#CBD5E1] rounded-lg px-2 py-1 text-xs font-bold text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
-                  />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <label className="text-[10px] font-bold text-[#64748B] uppercase">End Date:</label>
-                  <input
-                    type="date"
-                    value={dashPerfEndDate}
-                    onChange={(e) => setDashPerfEndDate(e.target.value)}
-                    className="bg-white border border-[#CBD5E1] rounded-lg px-2 py-1 text-xs font-bold text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 inline-flex items-center gap-2">
-              <span>Selected Performance Period: <span className="font-extrabold text-indigo-950">{dashPerfStartDate} to {dashPerfEndDate}</span></span>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                <span className="text-[10px] font-bold text-[#64748B] uppercase">Tasks Created</span>
-                <p className="text-2xl font-black text-[#2563EB] mt-1">{directorPerformance.tasksCreated}</p>
-              </div>
-              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                <span className="text-[10px] font-bold text-[#64748B] uppercase">Tasks Completed</span>
-                <p className="text-2xl font-black text-[#16A34A] mt-1">{directorPerformance.tasksCompleted}</p>
-              </div>
-              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                <span className="text-[10px] font-bold text-[#64748B] uppercase">Projects Managed</span>
-                <p className="text-2xl font-black text-[#7C3AED] mt-1">{directorPerformance.projectsManaged}</p>
-              </div>
-              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                <span className="text-[10px] font-bold text-[#64748B] uppercase">Flags Resolved</span>
-                <p className="text-2xl font-black text-[#16A34A] mt-1">{directorPerformance.flagsResolved}</p>
-              </div>
-              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                <span className="text-[10px] font-bold text-[#64748B] uppercase">Approvals Processed</span>
-                <p className="text-2xl font-black text-[#D97706] mt-1">{directorPerformance.approvalsProcessed}</p>
-              </div>
-              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                <span className="text-[10px] font-bold text-[#64748B] uppercase">Daily Entries Reviewed</span>
-                <p className="text-2xl font-black text-[#2563EB] mt-1">{directorPerformance.dailyEntriesReviewed}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* TAB 9: PROFILE */}
         {activeTab === 'profile' && (
           <DirectorProfile />
@@ -1763,6 +1940,7 @@ const Dashboard: React.FC = () => {
                   className="px-3.5 py-2 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
                 >
                   <option value="all">All Statuses</option>
+                  <option value="current">Current (Pending + In Progress)</option>
                   <option value="Pending">Pending</option>
                   <option value="In Progress">In Progress</option>
                   <option value="Pending Approval">Pending Approval</option>
@@ -1783,8 +1961,8 @@ const Dashboard: React.FC = () => {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-[#F8FAFC] text-[#64748B] uppercase font-bold text-[11px] border-b border-[#E2E8F0]">
-                    <th className="p-3.5">Task Title</th>
                     <th className="p-3.5">Project</th>
+                    <th className="p-3.5">Task Title</th>
                     <th className="p-3.5">Priority</th>
                     <th className="p-3.5">Assigned Staff</th>
                     <th className="p-3.5">Individual Status</th>
@@ -1796,12 +1974,18 @@ const Dashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2E8F0]">
-                  {filteredTasks.map(t => {
+                  {groupedFilteredTasks.map(group => (
+                    <React.Fragment key={group.projectId}>
+                      {group.items.map((t, index) => {
                     const tId = t.id || t._id || '';
                     return (
                       <tr key={tId} className="hover:bg-[#F8FAFC] transition">
+                        {index === 0 && (
+                          <td rowSpan={group.items.length} className="p-3.5 font-bold text-[#0F172A] align-top">
+                            {group.projectName}
+                          </td>
+                        )}
                         <td className="p-3.5 font-bold text-[#0F172A]">{t.title}</td>
-                        <td className="p-3.5 text-[#475569] font-medium">{t.projectName}</td>
                         <td className="p-3.5">
                           <PriorityBadge priority={t.priority} />
                         </td>
@@ -1887,7 +2071,9 @@ const Dashboard: React.FC = () => {
                         </td>
                       </tr>
                     );
-                  })}
+                      })}
+                    </React.Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -1896,15 +2082,123 @@ const Dashboard: React.FC = () => {
 
         {/* TAB 11: PROJECTS */}
         {activeTab === 'projects' && (
-          <ProjectList
-            projects={filteredProjects}
-            users={employees}
-            onProjectSave={handleSaveProject}
-            onProjectDelete={handleDeleteProject}
-            onProjectComplete={async (project) => {
-              await handleSaveProject({ ...project, status: 'Completed' });
-            }}
-          />
+          <div className="space-y-4">
+            {isDirector && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+                {([
+                  {
+                    key: 'all',
+                    label: 'Total Projects',
+                    value: stats.totalProjects,
+                    filter: 'all',
+                    accent: 'text-[#0F172A]',
+                    iconWrap: 'bg-blue-50 text-[#2563EB] group-hover:bg-[#2563EB]',
+                    hover: 'hover:border-[#2563EB]',
+                    Icon: FolderOpen,
+                    onClick: () => setProjectStatusFilter('all')
+                  },
+                  {
+                    key: 'ongoing',
+                    label: 'Ongoing',
+                    value: stats.activeProjects,
+                    filter: 'Ongoing',
+                    accent: 'text-[#2563EB]',
+                    iconWrap: 'bg-blue-50 text-[#2563EB] group-hover:bg-[#2563EB]',
+                    hover: 'hover:border-[#2563EB]',
+                    Icon: Layers,
+                    onClick: () => setProjectStatusFilter('Ongoing')
+                  },
+                  {
+                    key: 'upcoming',
+                    label: 'Upcoming',
+                    value: stats.upcomingProjects,
+                    filter: 'Upcoming',
+                    accent: 'text-[#7C3AED]',
+                    iconWrap: 'bg-purple-50 text-[#7C3AED] group-hover:bg-[#7C3AED]',
+                    hover: 'hover:border-[#7C3AED]',
+                    Icon: Sparkles,
+                    onClick: () => setProjectStatusFilter('Upcoming')
+                  },
+                  {
+                    key: 'sleeping',
+                    label: 'On Hold / Sleeping',
+                    value: stats.sleepingProjects,
+                    filter: 'Sleeping (On Hold)',
+                    accent: 'text-[#D97706]',
+                    iconWrap: 'bg-amber-50 text-[#D97706] group-hover:bg-[#D97706]',
+                    hover: 'hover:border-[#D97706]',
+                    Icon: Clock,
+                    onClick: () => setProjectStatusFilter('Sleeping (On Hold)')
+                  },
+                  {
+                    key: 'completed',
+                    label: 'Completed',
+                    value: stats.completedProjects,
+                    filter: 'Completed',
+                    accent: 'text-[#16A34A]',
+                    iconWrap: 'bg-emerald-50 text-[#16A34A] group-hover:bg-[#16A34A]',
+                    hover: 'hover:border-[#16A34A]',
+                    Icon: CheckCircle2,
+                    onClick: () => setProjectStatusFilter('Completed')
+                  },
+                  {
+                    key: 'employees',
+                    label: 'Total Employees',
+                    value: stats.totalEmployees,
+                    filter: '',
+                    accent: 'text-[#0F172A]',
+                    iconWrap: 'bg-slate-100 text-[#334155] group-hover:bg-[#0F172A]',
+                    hover: 'hover:border-[#2563EB]',
+                    Icon: Users,
+                    onClick: () => setActiveTab('employees')
+                  },
+                  {
+                    key: 'tasks',
+                    label: 'Current Tasks',
+                    value: stats.currentTasks,
+                    filter: '',
+                    accent: 'text-[#2563EB]',
+                    iconWrap: 'bg-blue-50 text-[#2563EB] group-hover:bg-[#2563EB]',
+                    hover: 'hover:border-[#2563EB]',
+                    Icon: ListTodo,
+                    onClick: () => { setActiveTab('tasks'); setTaskStatusFilter('current'); }
+                  }
+                ] as const).map(card => {
+                  const selected = Boolean(card.filter) && projectStatusFilter === card.filter;
+                  const Icon = card.Icon;
+                  return (
+                    <button
+                      key={card.key}
+                      type="button"
+                      onClick={card.onClick}
+                      className={`text-left bg-white px-3.5 py-3 rounded-[14px] border shadow-xs transition cursor-pointer group h-full ${
+                        selected ? 'border-[#2563EB] shadow-md' : `border-[#E2E8F0] ${card.hover} hover:shadow-md`
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${card.accent}`}>{card.label}</span>
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center group-hover:text-white transition ${card.iconWrap}`}>
+                          <Icon size={14} />
+                        </div>
+                      </div>
+                      <p className={`text-xl font-extrabold ${card.accent}`}>{card.value}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <ProjectList
+              projects={filteredProjects}
+              users={employees}
+              onProjectSave={handleSaveProject}
+              onProjectDelete={handleDeleteProject}
+              onProjectComplete={async (project) => {
+                await handleSaveProject({ ...project, status: 'Completed' });
+              }}
+              statusFilter={isDirector ? projectStatusFilter : undefined}
+              onStatusFilterChange={isDirector ? setProjectStatusFilter : undefined}
+            />
+          </div>
         )}
 
         {/* TAB 12: EMPLOYEES */}

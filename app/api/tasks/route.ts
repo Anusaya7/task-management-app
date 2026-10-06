@@ -101,7 +101,7 @@ export async function POST(req: Request) {
 
     await connectToDatabase()
     const body = await req.json()
-    const { title, description, projectId, priority, assignedEmployeeIds, reminderDate } = body
+    const { title, description, projectId, priority, assignedEmployeeIds, reminderDate, parentTaskId, dueDate, estimatedHours } = body
     const trimmedTitle = typeof title === 'string' ? title.trim() : ''
 
     if (!trimmedTitle || !projectId) {
@@ -115,6 +115,34 @@ export async function POST(req: Request) {
     const project = await Project.findById(projectId)
     if (!project) {
       return NextResponse.json({ error: 'Selected Project does not exist' }, { status: 400 })
+    }
+
+    let resolvedParentId = ''
+    let resolvedParentTitle = ''
+    if (parentTaskId) {
+      if (!mongoose.Types.ObjectId.isValid(String(parentTaskId))) {
+        return NextResponse.json({ error: 'Selected parent task does not exist' }, { status: 400 })
+      }
+      let parentTask = await Task.findById(parentTaskId)
+      if (!parentTask || parentTask.projectId !== project._id.toString()) {
+        return NextResponse.json({ error: 'Parent task must belong to the same project' }, { status: 400 })
+      }
+      if (parentTask.parentTaskId && String(parentTask.parentTaskId) === parentTask._id.toString()) {
+        parentTask.parentTaskId = undefined
+        parentTask.parentTaskTitle = undefined
+        await parentTask.save()
+      }
+      // Hierarchy is one level deep: attach to the top-level main task instead of a subtask.
+      if (parentTask.parentTaskId && mongoose.Types.ObjectId.isValid(String(parentTask.parentTaskId))) {
+        const mainTask = await Task.findById(parentTask.parentTaskId)
+        if (mainTask && mainTask.projectId === project._id.toString() && !mainTask.parentTaskId) {
+          parentTask = mainTask
+        }
+      }
+      if (!parentTask.parentTaskId) {
+        resolvedParentId = parentTask._id.toString()
+        resolvedParentTitle = parentTask.title
+      }
     }
 
     let validAssignees: string[] = []
@@ -174,7 +202,24 @@ export async function POST(req: Request) {
         existing.assignedEmployeeIds = mergedIds
         existing.assignedEmployeeNames = mergedNames
         existing.assigneeProgress = ensureAssigneeProgress(mergedIds, mergedNames, existing.assigneeProgress || [])
+        const nextDescription = description ? String(description).trim() : ''
+        if (nextDescription && nextDescription.toLowerCase() !== trimmedTitle.toLowerCase()) {
+          existing.description = nextDescription
+        }
         if (reminderDate) existing.reminderDate = reminderDate
+        if (dueDate) existing.dueDate = dueDate
+        if (typeof estimatedHours === 'number' && estimatedHours >= 0) existing.estimatedHours = estimatedHours
+        if (existing.parentTaskId && String(existing.parentTaskId) === existing._id.toString()) {
+          existing.parentTaskId = undefined
+          existing.parentTaskTitle = undefined
+        }
+        if (resolvedParentId && resolvedParentId !== existing._id.toString()) {
+          const existingHasSubtasks = await Task.exists({ parentTaskId: existing._id.toString(), _id: { $ne: existing._id } })
+          if (!existingHasSubtasks) {
+            existing.parentTaskId = resolvedParentId
+            existing.parentTaskTitle = resolvedParentTitle
+          }
+        }
         if (priority && existing.priority !== 'Self') existing.priority = taskPriority
         existing.updatedAt = new Date()
         await existing.save()
@@ -213,6 +258,10 @@ export async function POST(req: Request) {
       projectHeadId: user.role === 'Project Head' ? user._id.toString() : undefined,
       workDone: 0,
       reminderDate: reminderDate || undefined,
+      dueDate: dueDate || reminderDate || undefined,
+      parentTaskId: resolvedParentId || undefined,
+      parentTaskTitle: resolvedParentTitle || undefined,
+      estimatedHours: typeof estimatedHours === 'number' && estimatedHours >= 0 ? estimatedHours : undefined,
       assigneeProgress: ensureAssigneeProgress(validAssignees, assigneeNames),
     })
 

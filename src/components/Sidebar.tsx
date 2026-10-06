@@ -61,7 +61,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         { id: 'completed', label: 'Completed History', icon: CheckCircle2 },
         { id: 'reminders', label: 'Reminders', icon: Bell, badge: reminderCount },
         { id: 'flags', label: 'Flags', icon: Flag, badge: flagCount },
-        { id: 'performance', label: 'My Performance', icon: BarChart3 },
         { id: 'profile', label: 'Profile', icon: User }
       ]
     },
@@ -174,9 +173,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                     }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Icon size={17} className={isActive ? 'text-white' : 'text-slate-400'} />
-                    <span>{tab.label}</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon size={17} className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                    <span className="truncate">{tab.label}</span>
                   </div>
                   {tab.badge && tab.badge > 0 ? (
                     <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${isActive ? 'bg-white text-blue-700' : 'bg-rose-500 text-white'}`}>

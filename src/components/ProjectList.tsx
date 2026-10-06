@@ -15,7 +15,17 @@ interface ProjectListProps {
   onProjectDelete: (projectId: string) => void;
   onProjectComplete?: (project: Project) => void;
   onCommentAdded?: (projectId: string, comment: any) => void;
+  statusFilter?: string;
+  onStatusFilterChange?: (status: string) => void;
 }
+
+const PROJECT_STATUS_FILTER_OPTIONS = [
+  { value: 'all', label: 'All Projects' },
+  { value: 'Ongoing', label: 'Ongoing' },
+  { value: 'Upcoming', label: 'Upcoming' },
+  { value: 'Sleeping (On Hold)', label: 'On Hold / Sleeping' },
+  { value: 'Completed', label: 'Completed' }
+];
 
 const ProjectList: React.FC<ProjectListProps> = ({
   projects,
@@ -23,7 +33,9 @@ const ProjectList: React.FC<ProjectListProps> = ({
   onProjectSave,
   onProjectDelete,
   onProjectComplete,
-  onCommentAdded
+  onCommentAdded,
+  statusFilter,
+  onStatusFilterChange
 }) => {
   const { user } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -156,7 +168,30 @@ const ProjectList: React.FC<ProjectListProps> = ({
                   'View only - Employee access'}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {onStatusFilterChange && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600, color: '#374151' }}>
+                Project Status:
+                <select
+                  value={statusFilter || 'all'}
+                  onChange={(e) => onStatusFilterChange(e.target.value)}
+                  style={{
+                    padding: '7px 10px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: '#334155',
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {PROJECT_STATUS_FILTER_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               onClick={exportProjects}
               style={{

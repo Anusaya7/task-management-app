@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import Project from '@/models/Project'
+import Task from '@/models/Task'
+import DailyEntry from '@/models/DailyEntry'
+import Flag from '@/models/Flag'
+import Notification from '@/models/Notification'
+import Reminder from '@/models/Reminder'
+import TaskHistory from '@/models/TaskHistory'
+import TaskAssignmentHistory from '@/models/TaskAssignmentHistory'
+import PrivateRating from '@/models/PrivateRating'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 import { persistProjectStatus, serializeProject } from '@/lib/projectStatus'
 
@@ -42,6 +50,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    const previousProjectName = project.projectName
     if (body.projectName) project.projectName = body.projectName.trim()
     if (body.projectNumber) project.projectNumber = body.projectNumber.trim()
     if (body.location !== undefined) project.location = body.location.trim()
@@ -72,6 +81,17 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     project.updatedAt = new Date()
     await project.save()
 
+    // Tasks, daily entries and flags store a copy of the project name.
+    if (project.projectName !== previousProjectName) {
+      const projectId = project._id.toString()
+      const projectName = project.projectName
+      await Promise.all([
+        Task.updateMany({ projectId }, { $set: { projectName } }),
+        DailyEntry.updateMany({ projectId }, { $set: { projectName } }),
+        Flag.updateMany({ projectId }, { $set: { projectName } })
+      ])
+    }
+
     return NextResponse.json(serializeProject(project))
   } catch (error: any) {
     console.error('Project PUT API error:', error)
@@ -91,7 +111,30 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     }
 
     await connectToDatabase()
-    await Project.findByIdAndDelete(params.id)
+    const project = await Project.findByIdAndDelete(params.id)
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    // Remove everything employees could still see for this project.
+    const projectId = project._id.toString()
+    const projectTasks = await Task.find({ projectId }).select('_id')
+    const taskIds = projectTasks.map(task => task._id.toString())
+
+    await Promise.all([
+      Task.deleteMany({ projectId }),
+      DailyEntry.deleteMany({ projectId }),
+      Flag.deleteMany({ $or: [{ projectId }, { taskId: { $in: taskIds } }] }),
+      Notification.deleteMany({ $or: [{ projectId }, { taskId: { $in: taskIds } }] }),
+      ...(taskIds.length > 0
+        ? [
+            Reminder.deleteMany({ taskId: { $in: taskIds } }),
+            TaskHistory.deleteMany({ taskId: { $in: taskIds } }),
+            TaskAssignmentHistory.deleteMany({ taskId: { $in: taskIds } }),
+            PrivateRating.deleteMany({ taskId: { $in: taskIds } })
+          ]
+        : [])
+    ])
 
     return NextResponse.json({ success: true, message: 'Project deleted successfully' })
   } catch (error: any) {

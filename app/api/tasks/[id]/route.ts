@@ -4,6 +4,9 @@ import Task from '@/models/Task'
 import Project from '@/models/Project'
 import Employee from '@/models/Employee'
 import PrivateRating from '@/models/PrivateRating'
+import DailyEntry from '@/models/DailyEntry'
+import Flag from '@/models/Flag'
+import Reminder from '@/models/Reminder'
 import { getAuthUser } from '@/lib/auth'
 import { ensureAssigneeProgress, serializeTaskWithAssignees } from '@/lib/assigneeProgress'
 
@@ -84,6 +87,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     }
 
     const body = await req.json()
+    const previousTitle = task.title
+    const previousProjectId = task.projectId
+    const previousProjectName = task.projectName
     if (body.title) task.title = String(body.title).trim()
     if (body.description !== undefined) task.description = String(body.description).trim() || task.title
     if (body.projectId) {
@@ -127,8 +133,55 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       )
     }
     if (body.reminderDate !== undefined) task.reminderDate = body.reminderDate || undefined
+    if (body.dueDate !== undefined) task.dueDate = body.dueDate || undefined
+    if (body.estimatedHours !== undefined) {
+      const hours = Number(body.estimatedHours)
+      task.estimatedHours = Number.isFinite(hours) && hours >= 0 ? hours : undefined
+    }
+    if (body.parentTaskId !== undefined) {
+      const nextParentId = body.parentTaskId ? String(body.parentTaskId) : ''
+      if (!nextParentId) {
+        task.parentTaskId = undefined
+        task.parentTaskTitle = undefined
+      } else if (nextParentId === task._id.toString()) {
+        return NextResponse.json({ error: 'A task cannot be its own parent' }, { status: 400 })
+      } else {
+        const parentTask = await Task.findById(nextParentId)
+        if (!parentTask || parentTask.projectId !== task.projectId) {
+          return NextResponse.json({ error: 'Parent task must belong to the same project' }, { status: 400 })
+        }
+        if (parentTask.parentTaskId) {
+          return NextResponse.json({ error: 'Subtasks can only be added under a main task, not another subtask' }, { status: 400 })
+        }
+        task.parentTaskId = parentTask._id.toString()
+        task.parentTaskTitle = parentTask.title
+      }
+    }
     task.updatedAt = new Date()
     await task.save()
+
+    // Subtasks, daily entries, flags and reminders store a copy of the task/project name.
+    const taskId = task._id.toString()
+    const titleChanged = task.title !== previousTitle
+    const projectChanged = task.projectId !== previousProjectId || task.projectName !== previousProjectName
+    if (titleChanged || projectChanged) {
+      const copiedFields: Record<string, string | undefined> = {}
+      if (titleChanged) copiedFields.taskTitle = task.title
+      if (projectChanged) {
+        copiedFields.projectId = task.projectId
+        copiedFields.projectName = task.projectName
+      }
+      await Promise.all([
+        DailyEntry.updateMany({ taskId }, { $set: copiedFields }),
+        Flag.updateMany({ taskId }, { $set: copiedFields }),
+        ...(titleChanged
+          ? [
+              Reminder.updateMany({ taskId }, { $set: { taskTitle: task.title } }),
+              Task.updateMany({ parentTaskId: taskId }, { $set: { parentTaskTitle: task.title } })
+            ]
+          : [])
+      ])
+    }
 
     return NextResponse.json(serializeTaskWithAssignees(task))
   } catch (error: any) {

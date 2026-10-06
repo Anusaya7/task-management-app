@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Project, ProjectRemark, ProjectStatus } from '../types';
-import { X, Save, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { X, Save, Plus, Trash2, AlertCircle, Calendar } from 'lucide-react';
 import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectModalProps {
@@ -30,7 +30,6 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   const [contactDetails, setContactDetails] = useState('');
   const [status, setStatus] = useState<ProjectStatus>('Ongoing');
   const [remarks, setRemarks] = useState<ProjectRemark[]>([]);
-  const [newRemarkText, setNewRemarkText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -40,6 +39,22 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
     month: '2-digit',
     day: '2-digit'
   }).format(new Date());
+
+  const toDateInputValue = (value?: string) => {
+    if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    if (value) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(parsed);
+      }
+    }
+    return todayKolkata();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -53,7 +68,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       setStatus(normalizeProjectStatus(project.status));
       setRemarks((project.projectRemarks || []).map((item) => ({
         _id: item._id,
-        date: item.date,
+        date: toDateInputValue(item.date),
         remark: item.remark,
         createdBy: item.createdBy
       })));
@@ -66,21 +81,29 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       setStatus('Ongoing');
       setRemarks([]);
     }
-    setNewRemarkText('');
     setError('');
   }, [isOpen, project?.id || (project as any)?._id]);
 
   if (!isOpen) return null;
 
   const handleAddRemark = () => {
-    const text = newRemarkText.trim();
-    if (!text) return;
-    setRemarks(prev => [...prev, { date: todayKolkata(), remark: text }]);
-    setNewRemarkText('');
+    setRemarks(prev => [...prev, { date: todayKolkata(), remark: '' }]);
   };
 
   const handleRemoveRemark = (index: number) => {
     setRemarks(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleRemarkDateChange = (index: number, date: string) => {
+    setRemarks(prev => prev.map((item, i) => (
+      i === index ? { ...item, date: date || todayKolkata() } : item
+    )));
+  };
+
+  const handleRemarkTextChange = (index: number, remark: string) => {
+    setRemarks(prev => prev.map((item, i) => (
+      i === index ? { ...item, remark } : item
+    )));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -100,10 +123,13 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       return;
     }
 
-    const pendingRemark = newRemarkText.trim();
-    const allRemarks = pendingRemark
-      ? [...remarks, { date: todayKolkata(), remark: pendingRemark }]
-      : remarks;
+    const allRemarks = remarks
+      .map((item) => ({
+        ...item,
+        date: toDateInputValue(item.date),
+        remark: (item.remark || '').trim()
+      }))
+      .filter((item) => item.remark);
 
     setIsSubmitting(true);
     try {
@@ -253,58 +279,63 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
                 </span>
               )}
             </label>
-            
+
             {remarks.length > 0 && (
-              <div className="relative border-l-2 border-blue-500/40 ml-2 pl-4 space-y-3 mb-4">
+              <div className="mb-2 hidden sm:grid sm:grid-cols-[148px_minmax(0,1fr)_36px] sm:gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Date</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Remark/Task</span>
+                <span className="sr-only">Remove</span>
+              </div>
+            )}
+
+            {remarks.length > 0 && (
+              <div className="space-y-2 mb-3">
                 {remarks.map((r, idx) => (
-                  <div key={r._id || `remark-${idx}-${r.date}-${r.remark}`} className="relative bg-slate-50/80 p-3 rounded-xl border border-slate-200 text-xs">
-                    <span className="absolute -left-[21px] top-3.5 w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-white"></span>
-                    <div className="flex items-center justify-between">
-                      <span className="font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider">
-                        {r.date}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveRemark(idx)}
-                        className="text-slate-400 hover:text-rose-600 transition"
-                        title="Delete remark"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                    <p className="text-slate-800 font-medium mt-1.5 leading-relaxed">{r.remark}</p>
+                  <div
+                    key={r._id || `remark-row-${idx}`}
+                    className="grid grid-cols-1 sm:grid-cols-[148px_minmax(0,1fr)_36px] gap-2 items-center"
+                  >
+                    <label className="relative block">
+                      <span className="sr-only">Date</span>
+                      <Calendar size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-blue-600" />
+                      <input
+                        type="date"
+                        value={toDateInputValue(r.date)}
+                        onChange={(e) => handleRemarkDateChange(idx, e.target.value)}
+                        className="w-full pl-8 pr-2 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </label>
+                    <input
+                      type="text"
+                      value={r.remark}
+                      onChange={(e) => handleRemarkTextChange(idx, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.preventDefault();
+                      }}
+                      placeholder="Add new date-wise remark..."
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRemark(idx)}
+                      className="h-9 w-9 inline-flex items-center justify-center text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50"
+                      title="Delete remark"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newRemarkText}
-                onChange={(e) => setNewRemarkText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddRemark();
-                  }
-                }}
-                placeholder="Add new date-wise remark..."
-                className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                type="button"
-                onClick={handleAddRemark}
-                disabled={!newRemarkText.trim()}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg flex items-center gap-1 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Plus size={14} />
-                Add Remark
-              </button>
-            </div>
-            <p className="mt-1.5 text-[11px] text-slate-500">
-              Add multiple remarks (1, 2, 3… as many as needed), then Save Project. Each remark becomes a selectable task.
-            </p>
+            <button
+              type="button"
+              onClick={handleAddRemark}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg inline-flex items-center gap-1 shadow-xs"
+            >
+              <Plus size={14} />
+              Add Remark
+            </button>
           </div>
 
           {/* Action Buttons */}

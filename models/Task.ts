@@ -33,6 +33,9 @@ export interface ITask extends Document {
   flagMessage?: string
   flagDate?: string
   dueDate?: string
+  parentTaskId?: string
+  parentTaskTitle?: string
+  estimatedHours?: number
   createdAt: Date
   updatedAt: Date
 }
@@ -104,6 +107,9 @@ const taskSchema = new Schema<ITask>({
   flagMessage: { type: String },
   flagDate: { type: String },
   dueDate: { type: String },
+  parentTaskId: { type: String },
+  parentTaskTitle: { type: String },
+  estimatedHours: { type: Number, min: 0 },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 })

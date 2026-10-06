@@ -38,6 +38,7 @@ import {
   Edit3,
   Sparkles
 } from 'lucide-react';
+import { groupItemsByProject, orderMainTasksFirst } from '@/lib/taskHierarchy';
 
 type CategoryType = 'URGENT' | 'LESS_URGENT' | 'LOW_URGENT' | 'SELF_DEFINED' | 'DAILY_TASK';
 
@@ -106,6 +107,7 @@ interface DisplayTaskItem {
   title: string;
   description: string;
   category: CategoryType;
+  parentTaskId?: string;
 }
 
 interface BoardTask {
@@ -126,16 +128,33 @@ interface BoardTask {
   workDone: number; // 10-100%
   status: '' | 'In Progress' | 'Completed';
   urgency: 'URGENT' | 'LESS URGENT' | 'LOW URGENT' | 'SELF DEFINED' | 'DAILY TASK';
+  parentTaskId?: string;
+  parentTaskTitle?: string;
+  dueDate?: string;
+  estimatedHours?: number;
 }
 
-interface DailyWorkRow {
-  id: string;
+interface BoardBlock {
+  key: string;
+  taskId: string;
+  projectId: string;
   projectName: string;
   taskTitle: string;
-  description: string;
-  boardId: string;
-  entryId: string;
+  details: string;
+  urgency?: BoardTask['urgency'];
+  item?: BoardTask;
+  history: DailyEntry[];
 }
+
+const BOARD_HISTORY_ROWS = 3;
+
+const formatBoardDate = (dateStr: string) => {
+  const d = new Date(`${String(dateStr).substring(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  const month = d.toLocaleDateString('en-GB', { month: 'short' });
+  const weekday = d.toLocaleDateString('en-GB', { weekday: 'short' });
+  return `${d.getDate()} ${month} - ${weekday}`;
+};
 
 const EmployeeDashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -175,6 +194,8 @@ const EmployeeDashboard: React.FC = () => {
 
   // Daily Entry Task Board State
   const [dailyBoard, setDailyBoard] = useState<BoardTask[]>([]);
+  const dismissedBoardTaskIds = useRef<Set<string>>(new Set());
+  const submittedTodayTaskIds = useRef<Set<string>>(new Set());
   
   // Validation Errors state per board item ID
   const [fieldErrors, setFieldErrors] = useState<Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string; status?: string }>>({});
@@ -460,6 +481,101 @@ const EmployeeDashboard: React.FC = () => {
     return 'SELF DEFINED';
   };
 
+  const taskToBoardItem = (taskItem: {
+    taskId: string;
+    projectId: string;
+    projectName: string;
+    taskTitle: string;
+    details: string;
+    urgency?: BoardTask['urgency'];
+    parentTaskId?: string;
+    parentTaskTitle?: string;
+    dueDate?: string;
+    estimatedHours?: number;
+  }): BoardTask => ({
+    boardId: taskItem.taskId && taskItem.taskId !== 'OFFICE_WORK' ? `assigned_${taskItem.taskId}` : `board_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+    taskId: taskItem.taskId,
+    projectId: taskItem.projectId,
+    projectName: taskItem.projectName,
+    taskTitle: taskItem.taskTitle,
+    details: taskItem.details,
+    actionTaken: '',
+    date: todayDateStr,
+    hours: 0,
+    flagged: false,
+    flagComment: '',
+    concernedPersonId: '',
+    concernedPersonName: '',
+    workDone: 50,
+    status: 'In Progress',
+    urgency: taskItem.urgency || 'SELF DEFINED',
+    parentTaskId: taskItem.parentTaskId,
+    parentTaskTitle: taskItem.parentTaskTitle,
+    dueDate: taskItem.dueDate ? String(taskItem.dueDate).substring(0, 10) : undefined,
+    estimatedHours: taskItem.estimatedHours
+  });
+
+  useEffect(() => {
+    const submittedIds = new Set(
+      dailyHistory
+        .filter(entry => entry.date === todayDateStr)
+        .map(entry => entry.taskId)
+    );
+
+    setDailyBoard(prev => {
+      const existingIds = new Set(prev.map(item => item.taskId));
+      const additions: BoardTask[] = [];
+      for (const task of openingTasks) {
+        const taskId = task.id || task._id || '';
+        if (!taskId || task.status === 'Completed') continue;
+        if (submittedIds.has(taskId) || existingIds.has(taskId)) continue;
+        if (dismissedBoardTaskIds.current.has(taskId)) continue;
+        if (submittedTodayTaskIds.current.has(taskId)) continue;
+        additions.push(taskToBoardItem({
+          taskId,
+          projectId: task.projectId,
+          projectName: task.projectName || 'Project',
+          taskTitle: task.title,
+          details: task.description || '',
+          urgency: getUrgencyFromPriority(task.priority),
+          parentTaskId: task.parentTaskId,
+          parentTaskTitle: task.parentTaskTitle,
+          dueDate: task.dueDate || task.reminderDate,
+          estimatedHours: task.estimatedHours
+        }));
+      }
+      return additions.length === 0 ? prev : [...prev, ...additions];
+    });
+  }, [openingTasks, dailyHistory, todayDateStr]);
+
+  // Keep board cards in sync when the Director renames a task or project.
+  useEffect(() => {
+    const latestById = new Map([...openingTasks, ...tasks].map(task => [String(task.id || task._id || ''), task]));
+    setDailyBoard(prev => {
+      let changed = false;
+      const next = prev.map(item => {
+        const latest = latestById.get(String(item.taskId));
+        if (!latest) return item;
+        const projectName = latest.projectName || item.projectName;
+        if (
+          item.taskTitle === latest.title &&
+          item.projectId === latest.projectId &&
+          item.projectName === projectName &&
+          item.parentTaskTitle === latest.parentTaskTitle
+        ) return item;
+        changed = true;
+        return {
+          ...item,
+          taskTitle: latest.title,
+          projectId: latest.projectId,
+          projectName,
+          parentTaskTitle: latest.parentTaskTitle
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [tasks, openingTasks]);
+
   // Add Task to Daily Board
   const handleAddToDailyBoard = (taskItem: {
     taskId: string;
@@ -468,8 +584,11 @@ const EmployeeDashboard: React.FC = () => {
     taskTitle: string;
     details: string;
     urgency?: BoardTask['urgency'];
+    parentTaskId?: string;
+    parentTaskTitle?: string;
+    dueDate?: string;
+    estimatedHours?: number;
   }) => {
-    // Prevent duplicates
     const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.taskId && b.taskTitle === taskItem.taskTitle) ||
       dailyHistory.some(entry =>
         entry.date === todayDateStr &&
@@ -481,26 +600,8 @@ const EmployeeDashboard: React.FC = () => {
       return;
     }
 
-    const newBoardItem: BoardTask = {
-      boardId: `board_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      taskId: taskItem.taskId,
-      projectId: taskItem.projectId,
-      projectName: taskItem.projectName,
-      taskTitle: taskItem.taskTitle,
-      details: taskItem.details,
-      actionTaken: '',
-      date: todayDateStr,
-      hours: 0,
-      flagged: null as any,
-      flagComment: '',
-      concernedPersonId: '',
-      concernedPersonName: '',
-      workDone: 50,
-      status: '',
-      urgency: taskItem.urgency || 'SELF DEFINED'
-    };
-
-    setDailyBoard(prev => [...prev, newBoardItem]);
+    dismissedBoardTaskIds.current.delete(taskItem.taskId);
+    setDailyBoard(prev => [...prev, taskToBoardItem(taskItem)]);
     showToast('success', `Added "${taskItem.taskTitle}" to Daily Entry Task Board.`);
   };
 
@@ -521,8 +622,9 @@ const EmployeeDashboard: React.FC = () => {
       return;
     }
 
+    const sourceTask = openingTasks.find(task => (task.id || task._id) === taskItem.id);
     const newBoardItem: BoardTask = {
-      boardId: `board_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      boardId: `assigned_${taskItem.id}`,
       taskId: taskItem.id,
       projectId: taskItem.projectId,
       projectName: taskItem.projectName,
@@ -531,15 +633,20 @@ const EmployeeDashboard: React.FC = () => {
       actionTaken: '',
       date: todayDateStr,
       hours: 0,
-      flagged: null as any,
+      flagged: false,
       flagComment: '',
       concernedPersonId: '',
       concernedPersonName: '',
       workDone: 50,
-      status: '',
-      urgency: urgencyLabelMap[taskItem.category]
+      status: 'In Progress',
+      urgency: urgencyLabelMap[taskItem.category],
+      parentTaskId: sourceTask?.parentTaskId,
+      parentTaskTitle: sourceTask?.parentTaskTitle,
+      dueDate: sourceTask?.dueDate || sourceTask?.reminderDate,
+      estimatedHours: sourceTask?.estimatedHours
     };
 
+    dismissedBoardTaskIds.current.delete(taskItem.id);
     setDailyBoard(prev => [...prev, newBoardItem]);
     if (taskItem.category === 'DAILY_TASK') {
       showToast('success', "Daily task added to Daily Entry Chart successfully.");
@@ -573,6 +680,10 @@ const EmployeeDashboard: React.FC = () => {
   // Remove Task from Board
   const confirmRemoveBoardItem = () => {
     if (!removeTargetId) return;
+    const removed = dailyBoard.find(item => item.boardId === removeTargetId);
+    if (removed?.taskId && removed.taskId !== 'OFFICE_WORK') {
+      dismissedBoardTaskIds.current.add(removed.taskId);
+    }
     setDailyBoard(prev => prev.filter(item => item.boardId !== removeTargetId));
     setFieldErrors(prev => {
       const copy = { ...prev };
@@ -622,24 +733,6 @@ const EmployeeDashboard: React.FC = () => {
       setNewReminderError('Network error while creating reminder');
     } finally {
       setIsSavingReminder(false);
-    }
-  };
-
-  // Delete Self Created Daily Work Entry
-  const handleDeleteDailyEntry = async (id: string) => {
-    try {
-      const res = await fetch(`/api/daily-entries/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) {
-        showToast('error', data.error || 'Failed to delete entry');
-        return;
-      }
-      setDailyHistory(prev => prev.filter(e => (e.id || e._id) !== id));
-      showToast('success', 'Daily work entry deleted successfully.');
-      fetchData();
-    } catch (err) {
-      console.error('Delete daily entry error:', err);
-      showToast('error', 'Unable to delete daily work entry.');
     }
   };
 
@@ -697,12 +790,12 @@ const EmployeeDashboard: React.FC = () => {
       actionTaken: dailyWorkActionTaken.trim(),
       date: todayDateStr,
       hours,
-      flagged: null as any,
+      flagged: false,
       flagComment: '',
       concernedPersonId: '',
       concernedPersonName: '',
       workDone: 0,
-      status: '',
+      status: 'In Progress',
       urgency: 'SELF DEFINED'
     };
 
@@ -837,6 +930,9 @@ const EmployeeDashboard: React.FC = () => {
       }
 
       showToast('success', 'Daily entry submitted successfully.');
+      dailyBoard.forEach(item => {
+        if (item.taskId) submittedTodayTaskIds.current.add(item.taskId);
+      });
       setDailyBoard([]);
       setFieldErrors({});
       await fetchData(false);
@@ -1050,37 +1146,236 @@ const EmployeeDashboard: React.FC = () => {
       projectName: t.projectName || 'Project',
       title: t.title,
       description: t.description || 'No description available',
-      category: activeCategory
+      category: activeCategory,
+      parentTaskId: t.parentTaskId
     }));
 
   const combinedCategoryTasks = matchingDbTasks;
   const availableAssignedTasks = openingTasks
     .filter(task => task.status !== 'Completed')
     .filter(task => urgencyFilter === 'ALL' || getUrgencyFromPriority(task.priority) === urgencyFilter);
-  const dailyWorkRows: DailyWorkRow[] = [
-    ...todayEntries
-      .map((entry, index) => ({
-        id: entry.id || entry._id || `daily-entry-${index}`,
-        projectName: entry.projectName || 'Project',
-        taskTitle: entry.taskTitle,
-        description: entry.details || '',
-        boardId: '',
-        entryId: entry.id || entry._id || ''
-      })),
-    ...dailyBoard
-      .filter(item => !dailyHistory.some(entry =>
-        entry.date === todayDateStr &&
-        (entry.taskId === item.taskId || entry.id === item.taskId || entry._id === item.taskId)
-      ))
-      .map(item => ({
-        id: item.boardId,
-        projectName: item.projectName,
-        taskTitle: item.taskTitle,
-        description: item.details,
-        boardId: item.boardId,
-        entryId: ''
-      }))
+  const groupedCategoryTasks = groupItemsByProject(
+    orderMainTasksFirst(combinedCategoryTasks, t => t.id, t => t.parentTaskId)
+  );
+  const groupedAssignedTasks = groupItemsByProject(
+    availableAssignedTasks.map(t => ({
+      ...t,
+      projectId: t.projectId,
+      projectName: t.projectName || 'Project'
+    }))
+  );
+  const groupedEmployeeTasks = groupItemsByProject(
+    tasks.map(t => ({
+      ...t,
+      projectId: t.projectId,
+      projectName: t.projectName || 'Project'
+    }))
+  );
+
+  const entryMatchesTask = (entry: DailyEntry, taskId: string, taskTitle: string, projectId: string) =>
+    taskId && taskId !== 'OFFICE_WORK'
+      ? entry.taskId === taskId
+      : entry.taskTitle === taskTitle && String(entry.projectId) === String(projectId);
+
+  const taskEntryHistory = (taskId: string, taskTitle: string, projectId: string) =>
+    dailyHistory
+      .filter(entry => entryMatchesTask(entry, taskId, taskTitle, projectId))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .slice(-BOARD_HISTORY_ROWS);
+
+  const submittedOnlyBlocks: BoardBlock[] = [];
+  for (const entry of todayEntries) {
+    const onBoard = dailyBoard.some(item => entryMatchesTask(entry, item.taskId, item.taskTitle, item.projectId));
+    const alreadyListed = submittedOnlyBlocks.some(block => entryMatchesTask(entry, block.taskId, block.taskTitle, block.projectId));
+    if (onBoard || alreadyListed) continue;
+    submittedOnlyBlocks.push({
+      key: `submitted_${entry.id || entry._id || entry.taskId}`,
+      taskId: entry.taskId,
+      projectId: entry.projectId,
+      projectName: entry.projectName || 'Project',
+      taskTitle: entry.taskTitle,
+      details: entry.details || '',
+      history: taskEntryHistory(entry.taskId, entry.taskTitle, entry.projectId)
+    });
+  }
+
+  const boardBlocks: BoardBlock[] = [
+    ...dailyBoard.map(item => ({
+      key: item.boardId,
+      taskId: item.taskId,
+      projectId: item.projectId,
+      projectName: item.projectName,
+      taskTitle: item.taskTitle,
+      details: item.details,
+      urgency: item.urgency,
+      item,
+      history: taskEntryHistory(item.taskId, item.taskTitle, item.projectId)
+    })),
+    ...submittedOnlyBlocks
   ];
+  const boardBlockGroups = groupItemsByProject(
+    orderMainTasksFirst(boardBlocks, block => block.taskId, block => block.item?.parentTaskId)
+  );
+
+  const renderBoardBlock = (block: BoardBlock) => {
+    const item = block.item;
+    const errs = item ? fieldErrors[item.boardId] : undefined;
+    const isFlagged = item?.flagged === true;
+    const rowCount = block.history.length + (item ? 1 : 0);
+    if (rowCount === 0) return null;
+
+    const rowBg = (index: number) => (index % 2 === 0 ? 'bg-[#E9EBF5]' : 'bg-[#CFD5EA]');
+
+    const taskCell = (
+      <td rowSpan={rowCount} className="align-top pl-6 pr-3 py-2 bg-[#CFD5EA] border border-white">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-black leading-snug break-words">
+              <span className="mr-1.5">-</span>{block.taskTitle}
+            </p>
+            {block.details && block.details.trim().toLowerCase() !== block.taskTitle.trim().toLowerCase() && (
+              <p className="pl-3 text-[13px] text-slate-700 leading-snug whitespace-pre-line break-words">{block.details}</p>
+            )}
+            {block.urgency && (
+              <span className={`inline-block mt-1 px-1.5 py-px text-[9px] font-bold tracking-wide rounded whitespace-nowrap ${
+                block.urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
+                block.urgency === 'LESS URGENT' ? 'bg-amber-100 text-amber-800' :
+                block.urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
+                block.urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
+                'bg-indigo-100 text-indigo-800'
+              }`}>
+                {block.urgency}
+              </span>
+            )}
+          </div>
+          {item && (
+            <button
+              onClick={() => setRemoveTargetId(item.boardId)}
+              className="p-1 text-slate-500 hover:text-rose-600 hover:bg-white/60 rounded transition cursor-pointer flex-shrink-0"
+              title="Remove task from daily board"
+              aria-label={`Remove ${item.taskTitle} from daily board`}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </td>
+    );
+
+    const rows = block.history.map((entry, index) => (
+      <tr key={`${block.key}-h-${entry.id || entry._id || index}`} className={rowBg(index)}>
+        {index === 0 && taskCell}
+        <td className="px-3 py-2 border border-white text-sm text-black align-top break-words">
+          {entry.actionTaken || '—'}
+        </td>
+        <td className="px-3 py-2 border border-white text-sm text-black align-top whitespace-nowrap">
+          {formatBoardDate(entry.date)}
+        </td>
+        <td className="px-2 py-2 border border-white text-center align-top">
+          {entry.flagged && (
+            <span className="inline-block px-2 py-0.5 bg-[#ED7D31] border border-[#4472C4] text-white text-[10px] font-semibold">
+              Flag
+            </span>
+          )}
+        </td>
+        <td className="px-3 py-2 border border-white text-center text-sm font-semibold text-[#0070C0] align-top">
+          {formatHoursMinutes(entry.hours)}
+        </td>
+      </tr>
+    ));
+
+    if (item) {
+      rows.push(
+        <tr key={`${block.key}-today`} className={rowBg(block.history.length)}>
+          {block.history.length === 0 && taskCell}
+          <td className="px-3 py-2 border border-white align-top">
+            <textarea
+              rows={2}
+              value={item.actionTaken}
+              onChange={(e) => updateBoardItem(item.boardId, { actionTaken: e.target.value })}
+              placeholder="Action taken"
+              className={`w-full resize-y px-2 py-1 text-sm text-black placeholder:text-black/60 border focus:outline-none focus:ring-2 ${
+                errs?.actionTaken
+                  ? 'bg-rose-100 border-rose-500 focus:ring-rose-500'
+                  : 'bg-[#00B050] border-[#00B050] focus:ring-emerald-900'
+              }`}
+            />
+            {errs?.actionTaken && (
+              <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.actionTaken}</p>
+            )}
+            {isFlagged && (
+              <textarea
+                rows={2}
+                value={item.flagComment}
+                onChange={(e) => updateBoardItem(item.boardId, { flagComment: e.target.value })}
+                placeholder="Reason for flag / blocker..."
+                className="mt-1 w-full px-2 py-1 text-xs border border-[#ED7D31] bg-orange-50 text-orange-950 focus:outline-none focus:ring-2 focus:ring-orange-400"
+              />
+            )}
+            <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={item.status === 'Completed'}
+                onChange={(e) => updateBoardItem(item.boardId, e.target.checked
+                  ? { status: 'Completed', workDone: 100 }
+                  : { status: 'In Progress', workDone: item.workDone === 100 ? 50 : item.workDone })}
+                className="h-3.5 w-3.5 accent-[#00B050]"
+              />
+              Mark task completed
+            </label>
+          </td>
+          <td className="px-3 py-2 border border-white align-top">
+            <span className="inline-block px-1.5 py-0.5 bg-[#00B050] text-sm text-black whitespace-nowrap">
+              {formatBoardDate(item.date)}
+            </span>
+          </td>
+          <td className="px-2 py-2 border border-white text-center align-top">
+            <button
+              type="button"
+              onClick={() => updateBoardItem(item.boardId, isFlagged
+                ? { flagged: false, flagComment: '', concernedPersonId: '', concernedPersonName: '' }
+                : { flagged: true })}
+              className={`px-2 py-0.5 text-[10px] font-semibold text-white border transition cursor-pointer ${
+                isFlagged
+                  ? 'bg-[#C55A11] border-red-700 ring-2 ring-red-500'
+                  : 'bg-[#ED7D31] border-[#4472C4] hover:bg-[#C55A11]'
+              }`}
+              title={isFlagged ? 'Remove flag' : 'Flag this task'}
+              aria-pressed={isFlagged}
+            >
+              Flag
+            </button>
+          </td>
+          <td className="px-3 py-2 border border-white text-center align-top">
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="Hours"
+              value={item.hoursInput !== undefined ? item.hoursInput : (item.hours ? hoursToHHMM(item.hours) : '')}
+              onChange={(e) => {
+                const val = e.target.value;
+                const parsed = parseTimeInput(val);
+                updateBoardItem(item.boardId, {
+                  hours: parsed.ok ? parsed.hours : 0,
+                  hoursInput: val
+                });
+              }}
+              className={`w-20 px-1.5 py-1 text-sm font-bold text-center text-black placeholder:text-black/60 border focus:outline-none focus:ring-2 ${
+                errs?.hours
+                  ? 'bg-rose-100 border-rose-500 focus:ring-rose-500'
+                  : 'bg-[#00B050] border-[#00B050] focus:ring-emerald-900'
+              }`}
+            />
+            {errs?.hours && (
+              <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.hours}</p>
+            )}
+          </td>
+        </tr>
+      );
+    }
+
+    return rows;
+  };
 
   return (
     <div className="flex bg-[#F8FAFC] min-h-screen font-sans text-slate-900">
@@ -1093,49 +1388,50 @@ const EmployeeDashboard: React.FC = () => {
       />
 
       {/* Main Content Viewport */}
-      <div className="flex-1 w-full pt-20 px-4 pb-12 md:pt-8 md:p-8 md:ml-64">
-        
+      <div className="flex-1 min-w-0 w-full pt-20 px-4 pb-12 md:pt-8 md:px-6 lg:px-8 md:ml-64">
+        <div className="mx-auto w-full max-w-[1600px] min-w-0">
+
         {/* UPDATE 2 — Header with Dynamic Logged-in Employee Name */}
-        <header className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 pb-6 border-b border-slate-200 gap-4 bg-white p-6 rounded-2xl shadow-sm">
-          <div className="flex items-center gap-4">
+        <header className="flex flex-col xl:flex-row xl:items-center justify-between mb-6 gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <img
               src="/logo.png"
               alt="Korals Design Logo"
-              className="h-11 w-auto object-contain bg-black px-2 py-1 rounded-xl border border-slate-200 shadow-xs hidden sm:block"
+              className="h-11 w-auto object-contain bg-black px-2 py-1 rounded-xl border border-slate-200 shadow-xs hidden sm:block flex-shrink-0"
             />
-            <div className="w-12 h-12 rounded-xl bg-indigo-900 text-white flex items-center justify-center font-black text-xl shadow-md">
+            <div className="w-11 h-11 rounded-xl bg-indigo-900 text-white flex items-center justify-center font-black text-lg shadow-md flex-shrink-0">
               {user?.name?.charAt(0) || 'E'}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-black text-[#172554] tracking-tight">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-black text-[#172554] tracking-tight">
                   Employee Dashboard
                 </h1>
-                <span className="px-3 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                   Online
                 </span>
               </div>
-              <p className="text-sm font-bold text-indigo-600 mt-0.5">
+              <p className="text-sm font-bold text-indigo-600 mt-0.5 truncate">
                 Welcome, {user?.name || 'Employee'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-wrap min-w-0">
             <NotificationCenter onSelectTask={() => setActiveTab('today-work')} />
 
-            <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl shadow-xs text-xs font-bold text-slate-700">
-              <Calendar size={15} className="text-indigo-600" />
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 whitespace-nowrap">
+              <Calendar size={15} className="text-indigo-600 flex-shrink-0" />
               <span>{todayFormattedText}</span>
             </div>
 
-            <div className="flex items-center gap-2.5 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl">
-              <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+            <div className="flex items-center gap-2.5 px-3.5 py-2 bg-indigo-50 border border-indigo-200 rounded-xl min-w-0 max-w-full">
+              <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0">
                 {user?.name?.charAt(0) || 'E'}
               </div>
-              <div className="text-left">
-                <p className="text-xs font-bold text-indigo-950 leading-tight">{user?.name || 'Employee'}</p>
-                <p className="text-[10px] font-semibold text-indigo-600">{user?.email || 'Employee'}</p>
+              <div className="text-left min-w-0">
+                <p className="text-xs font-bold text-indigo-950 leading-tight truncate">{user?.name || 'Employee'}</p>
+                <p className="text-[10px] font-semibold text-indigo-600 truncate">{user?.email || 'Employee'}</p>
               </div>
             </div>
 
@@ -1338,36 +1634,37 @@ const EmployeeDashboard: React.FC = () => {
                     <table className="w-full text-left border-collapse min-w-[700px]">
                       <thead>
                         <tr className="bg-[#F8FAFC] text-[#0F172A] text-xs font-extrabold uppercase tracking-wider border-b border-[#E2E8F0]">
-                          <th className="py-3.5 px-4 w-[20%]">Project</th>
-                          <th className="py-3.5 px-4 w-[28%]">Task</th>
-                          <th className="py-3.5 px-4 w-[32%]">Description</th>
-                          <th className="py-3.5 px-4 w-[20%] text-center">Action</th>
+                          <th className="py-3.5 px-4 w-[40%]">Project / Task</th>
+                          <th className="py-3.5 px-4 w-[38%]">Description</th>
+                          <th className="py-3.5 px-4 w-[22%] text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#E2E8F0] text-sm text-[#0F172A]">
-                        {combinedCategoryTasks.map((t) => {
+                        {groupedCategoryTasks.map(group => (
+                          <React.Fragment key={`category-group-${group.projectId}`}>
+                          <tr className="bg-[#F1F5F9]">
+                            <td colSpan={3} className="py-2.5 px-4 font-bold text-[#0F172A]">
+                              {group.projectName}
+                            </td>
+                          </tr>
+                          {group.items.map(t => {
                           const isAdded = dailyBoard.some(b => b.taskId === t.id) ||
                             dailyHistory.some(entry => entry.taskId === t.id && entry.date === todayDateStr);
 
                           return (
                             <tr key={t.id} className="hover:bg-[#F8FAFC] transition-colors">
-                              {/* PROJECT */}
-                              <td className="py-4 px-4 font-bold align-top text-[#0F172A]">
-                                {t.projectName}
-                              </td>
-
                               {/* TASK */}
-                              <td className="py-4 px-4 font-semibold align-top text-[#0F172A]">
-                                {t.title}
+                              <td className="py-3 pl-8 pr-4 font-semibold align-top text-[#0F172A] break-words">
+                                <span className="text-slate-400 mr-1.5">-</span>{t.title}
                               </td>
 
                               {/* DESCRIPTION */}
-                              <td className="py-4 px-4 align-top break-words">
+                              <td className="py-3 px-4 align-top break-words">
                                 {renderDescription(t.description)}
                               </td>
 
                               {/* ACTION */}
-                              <td className="py-4 px-4 text-center align-top">
+                              <td className="py-3 px-4 text-center align-top">
                                 <button
                                   disabled={isAdded}
                                   onClick={() => handleAddCategoryTaskToDailyBoard(t)}
@@ -1392,77 +1689,14 @@ const EmployeeDashboard: React.FC = () => {
                               </td>
                             </tr>
                           );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              <section className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E2E8F0]">
-                  <div>
-                    <h3 className="text-base font-bold text-[#0F172A]">Daily Work</h3>
-                    <p className="text-xs text-[#64748B]">Tasks you have added to your existing Daily Entry board.</p>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab('today-work')}
-                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <CalendarCheck size={15} />
-                    <span>ADD DAILY WORK{dailyBoard.length > 0 ? ` (${dailyBoard.length})` : ''}</span>
-                  </button>
-                </div>
-
-                {dailyWorkRows.length === 0 ? (
-                  <div className="py-8 text-center space-y-2 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    <FileText className="w-8 h-8 text-slate-300 mx-auto" />
-                    <p className="text-xs font-bold text-[#0F172A]">No daily work added yet.</p>
-                    <p className="text-xs text-[#64748B]">Choose a task above and add it to Daily Entry.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[640px]">
-                      <thead>
-                        <tr className="bg-[#F8FAFC] text-[#0F172A] text-xs font-extrabold uppercase tracking-wider border-b border-[#E2E8F0]">
-                          <th className="py-3.5 px-4 w-[22%]">Project</th>
-                          <th className="py-3.5 px-4 w-[26%]">Task</th>
-                          <th className="py-3.5 px-4 w-[36%]">Description</th>
-                          <th className="py-3.5 px-4 w-[16%] text-center">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#E2E8F0] text-sm text-[#0F172A]">
-                        {dailyWorkRows.map(item => (
-                          <tr key={item.id} className="hover:bg-[#F8FAFC] transition-colors">
-                            <td className="py-3.5 px-4 font-bold align-top">{item.projectName}</td>
-                            <td className="py-3.5 px-4 font-semibold align-top">{item.taskTitle}</td>
-                            <td className="py-3.5 px-4 align-top text-[#64748B]">{item.description || '-'}</td>
-                            <td className="py-3.5 px-4 text-center align-top">
-                              {item.boardId ? (
-                                <button
-                                  onClick={() => setRemoveTargetId(item.boardId)}
-                                  className="px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg transition cursor-pointer"
-                                >
-                                  Remove
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => handleDeleteDailyEntry(item.entryId)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                                  title="Delete daily entry"
-                                  aria-label={`Delete ${item.taskTitle} from Daily Work`}
-                                >
-                                  <Trash2 size={15} />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
+                          })}
+                          </React.Fragment>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
-              </section>
+              </div>
             </div>
 
           </div>
@@ -1470,19 +1704,13 @@ const EmployeeDashboard: React.FC = () => {
 
         {/* TAB 2: DAILY ENTRY TASK BOARD (Page 2 & Page 3) */}
         {activeTab === 'today-work' && (
-          <div className="space-y-8">
+          <div className="space-y-6 min-w-0">
             
-            {/* Top Board Title & Free Hours Summary */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-                <div>
-                  <h2 className="text-xl font-black text-[#172554]">Daily Entry Task Board</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Complete required green entry fields and click Submit &bull; Auto Date: <span className="font-bold text-slate-800">{todayDateStr}</span>
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3 flex-wrap">
+            {/* Daily Entry Task Board */}
+            <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200 space-y-3 min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-xl font-bold text-[#E00000]">Employee Dashboard</h2>
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => {
                       setDailyWorkError('');
@@ -1491,32 +1719,23 @@ const EmployeeDashboard: React.FC = () => {
                       }
                       setIsDailyWorkModalOpen(true);
                     }}
-                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-2 bg-white hover:bg-slate-50 text-[#4472C4] border border-[#4472C4] text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Plus size={15} />
-                    <span>+ Add Daily Work</span>
+                    <Plus size={14} />
+                    <span>Add Daily Work</span>
                   </button>
-                  <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700">
-                    Today&apos;s Hours: <span className="text-indigo-600 font-extrabold">{formatHoursMinutes(allocatedHours)}</span> / 08:00
-                    {overtimeHours > 0 && (
-                      <span className="ml-2 text-amber-700">Extra {formatHoursMinutes(overtimeHours)}</span>
-                    )}
-                  </div>
-                  <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-xl text-xs font-bold text-blue-900 shadow-xs">
-                    Free Time: <span className="font-black text-blue-700">{formatHoursMinutes(freeHours)}</span>
-                  </div>
+                  <button
+                    disabled={submitting}
+                    onClick={handleSubmitDailyBoard}
+                    className={`min-w-[150px] px-8 py-2.5 text-base text-white border transition cursor-pointer ${
+                      submitting
+                        ? 'bg-slate-400 border-slate-400 cursor-not-allowed'
+                        : 'bg-[#ED7D31] border-[#C55A11] hover:bg-[#C55A11]'
+                    }`}
+                  >
+                    {submitting ? 'Submitting...' : 'Submit'}
+                  </button>
                 </div>
-              </div>
-
-              {/* Required Green Fields Banner */}
-              <div className="bg-emerald-50/70 border border-emerald-300 rounded-xl p-4 flex items-center justify-between text-xs text-emerald-950">
-                <div className="flex items-center gap-2 font-bold">
-                  <CheckSquare size={18} className="text-emerald-600 flex-shrink-0" />
-                  <span>Required Green Fields: Action Taken and Hours must be completed before submission. Date is automatic today.</span>
-                </div>
-                <span className="text-[11px] font-black bg-emerald-200 text-emerald-950 px-2.5 py-1 rounded-md">
-                  * Required Green Entries
-                </span>
               </div>
 
               {/* Global Error Banner */}
@@ -1527,383 +1746,55 @@ const EmployeeDashboard: React.FC = () => {
                 </div>
               )}
 
-              {/* Section 8 Table Interface */}
-              {dailyBoard.length === 0 && todayEntries.length === 0 ? (
+              {boardBlocks.length === 0 ? (
                 /* Empty State */
                 <div className="text-center py-16 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
                   <ListTodo size={42} className="mx-auto text-slate-300 mb-3" />
                   <h3 className="text-base font-bold text-slate-800">No tasks added to today&apos;s Daily Entry.</h3>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                    Select one of your assigned tasks below to add it to your Daily Entry Task Board.
+                    Assigned project tasks appear here automatically. Use Add Daily Work to add other work.
                   </p>
-                  <button
-                    onClick={() => {
-                      const el = document.getElementById('available-tasks-section');
-                      if (el) el.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    className="mt-4 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs rounded-xl shadow-xs transition inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Plus size={15} />
-                    <span>Browse & Add Tasks</span>
-                  </button>
-                </div>
-              ) : dailyBoard.length > 0 ? (
-                <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
-                  <table className="w-full text-left border-collapse min-w-[1250px]">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10">
-                        <th className="py-3.5 px-4 w-[10%] rounded-tl-xl">Project</th>
-                        <th className="py-3.5 px-4 w-[15%]">Task</th>
-                        <th className="py-3.5 px-4 w-[15%]">Description</th>
-                        <th className="py-3.5 px-4 w-[36%] bg-emerald-100/70 text-emerald-950 border-x border-emerald-300">
-                          Action Taken * (Green Entry)
-                        </th>
-                        <th className="py-3.5 px-4 w-[9%] bg-slate-100 text-slate-800 border-r border-slate-200 text-center">
-                          Date * (Auto)
-                        </th>
-                        <th className="py-3.5 px-4 w-[8%] bg-emerald-100/70 text-emerald-950 border-r border-emerald-300 text-center">
-                          Hours * (Green Entry)
-                        </th>
-                        <th className="py-3.5 px-4 w-[8%] text-center">Progress %</th>
-                        <th className="py-3.5 px-4 w-[12%] text-center">Status *</th>
-                        <th className="py-3.5 px-4 w-[16%] text-center">Flag * (Yes/No)</th>
-                        <th className="py-3.5 px-4 text-center rounded-tr-xl">Remove</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 text-xs">
-                      {dailyBoard.map((item) => {
-                        const errs = fieldErrors[item.boardId];
-
-                        return (
-                          <tr key={item.boardId} className="hover:bg-slate-50/80 transition">
-                            {/* Project */}
-                            <td className="py-3.5 px-4 font-bold text-slate-900 align-top">
-                              {item.projectName}
-                            </td>
-
-                            {/* Task */}
-                            <td className="py-3.5 px-4 align-top">
-                              <p className="font-bold text-slate-900">{item.taskTitle}</p>
-                              <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-black rounded ${
-                                item.urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
-                                item.urgency === 'LESS URGENT' ? 'bg-amber-100 text-amber-800' :
-                                item.urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
-                                item.urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
-                                'bg-indigo-100 text-indigo-800'
-                              }`}>
-                                {item.urgency}
-                              </span>
-                            </td>
-
-                            {/* Original Task Description */}
-                            <td className="py-3.5 px-4 align-top text-slate-600">
-                              {item.details || <span className="italic text-slate-400">No description available</span>}
-                            </td>
-
-                            {/* Action Taken (Green Required Field) */}
-                            <td className="py-3.5 px-4 bg-emerald-50/40 border-x border-emerald-200 align-top">
-                              <textarea
-                                rows={3}
-                                value={item.actionTaken}
-                                onChange={(e) => updateBoardItem(item.boardId, { actionTaken: e.target.value })}
-                                placeholder="Enter completed work details..."
-                                className={`w-full px-3 py-2 text-xs rounded-lg border transition focus:outline-none ${
-                                  errs?.actionTaken 
-                                    ? 'bg-rose-50 border-rose-400 focus:ring-2 focus:ring-rose-500' 
-                                    : 'bg-emerald-50/80 border-emerald-300 text-emerald-950 focus:ring-2 focus:ring-emerald-500 font-medium'
-                                }`}
-                              />
-                              {errs?.actionTaken && (
-                                <p className="text-[11px] font-bold text-rose-600 mt-1">{errs.actionTaken}</p>
-                              )}
-                            </td>
-
-                            {/* Date (System Generated Today's Date) */}
-                            <td className="py-3.5 px-4 bg-slate-50/70 border-r border-slate-200 align-top font-bold text-slate-800 whitespace-nowrap text-center">
-                              <div className="px-2.5 py-2 bg-slate-100 border border-slate-300 rounded-lg text-center text-[11px]">
-                                {item.date}
-                              </div>
-                            </td>
-
-                            {/* Hours (Green Required Field) */}
-                            <td className="py-3.5 px-4 bg-emerald-50/40 border-r border-emerald-200 align-top w-28">
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="HH:MM"
-                                value={item.hoursInput !== undefined ? item.hoursInput : (item.hours ? hoursToHHMM(item.hours) : '')}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  const parsed = parseTimeInput(val);
-                                  updateBoardItem(item.boardId, {
-                                    hours: parsed.ok ? parsed.hours : 0,
-                                    hoursInput: val
-                                  });
-                                }}
-                                className={`w-full px-3 py-2 text-xs rounded-lg border font-bold text-center transition focus:outline-none ${
-                                  errs?.hours
-                                    ? 'bg-rose-50 border-rose-400 text-rose-900 focus:ring-2 focus:ring-rose-500'
-                                    : 'bg-emerald-50/80 border-emerald-300 text-emerald-950 focus:ring-2 focus:ring-emerald-500'
-                                }`}
-                              />
-                              {errs?.hours && (
-                                <p className="text-[11px] font-bold text-rose-600 mt-1">{errs.hours}</p>
-                              )}
-                            </td>
-
-                            <td className="py-3.5 px-4 align-top text-center">
-                              <select
-                                value={item.workDone}
-                                onChange={(e) => updateBoardItem(item.boardId, { workDone: Number(e.target.value) })}
-                                className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                title="Set 100% to submit this task for completion approval"
-                              >
-                                <option value={10}>10%</option>
-                                <option value={25}>25%</option>
-                                <option value={50}>50%</option>
-                                <option value={75}>75%</option>
-                                <option value={90}>90%</option>
-                                <option value={100}>100%</option>
-                              </select>
-                            </td>
-
-                            {/* Status (Required Selection In Progress / Completed) */}
-                            <td className="py-3.5 px-4 align-top min-w-[140px]">
-                              <div className="space-y-1">
-                                <select
-                                  value={item.status}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    updateBoardItem(item.boardId, {
-                                      status: val === 'In Progress' || val === 'Completed' ? val : ''
-                                    });
-                                  }}
-                                  className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-bold transition focus:outline-none ${
-                                    errs?.status ? 'bg-rose-50 border-rose-400 text-rose-900 focus:ring-2 focus:ring-rose-500' : 'bg-white border-slate-300 text-slate-800'
-                                  }`}
-                                >
-                                  <option value="">-- Select Status * --</option>
-                                  <option value="In Progress">In Progress</option>
-                                  <option value="Completed">Completed</option>
-                                </select>
-                                {errs?.status && (
-                                  <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.status}</p>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Flag (Required Selection Yes / No) */}
-                            <td className="py-3.5 px-4 align-top min-w-[140px]">
-                              <div className="space-y-1">
-                                <select
-                                  value={item.flagged === undefined || item.flagged === null ? '' : (item.flagged ? 'Yes' : 'No')}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === 'Yes') updateBoardItem(item.boardId, { flagged: true });
-                                    else if (val === 'No') updateBoardItem(item.boardId, { flagged: false, flagComment: '', concernedPersonId: '', concernedPersonName: '' });
-                                    else updateBoardItem(item.boardId, { flagged: null as any });
-                                  }}
-                                  className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-bold transition focus:outline-none ${
-                                    errs?.flagged ? 'bg-rose-50 border-rose-400 text-rose-900 focus:ring-2 focus:ring-rose-500' : 'bg-white border-slate-300 text-slate-800'
-                                  }`}
-                                >
-                                  <option value="">-- Select Flag * --</option>
-                                  <option value="No">No</option>
-                                  <option value="Yes">Yes</option>
-                                </select>
-
-                                {errs?.flagged && (
-                                  <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.flagged}</p>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Remove */}
-                            <td className="py-3.5 px-4 text-center align-top">
-                              <button
-                                onClick={() => setRemoveTargetId(item.boardId)}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                                title="Remove task from daily board"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-
-              {todayEntries.length > 0 && (
-                <section className="space-y-3">
-                  <div>
-                    <h3 className="text-base font-bold text-[#0F172A]">Submitted Today</h3>
-                    <p className="text-xs text-[#64748B]">Saved Daily Entry records for {todayDateStr}.</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[900px]">
-                      <thead>
-                        <tr className="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200">
-                          <th className="py-3 px-4">Project</th>
-                          <th className="py-3 px-4">Task</th>
-                          <th className="py-3 px-4">Description</th>
-                          <th className="py-3 px-4">Action Taken</th>
-                          <th className="py-3 px-4 text-center">Date</th>
-                          <th className="py-3 px-4 text-center">Hours</th>
-                          <th className="py-3 px-4 text-center">Flag</th>
-                          <th className="py-3 px-4 text-center">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 text-xs">
-                        {todayEntries.map((entry, index) => (
-                          <tr key={entry.id || entry._id || `today-entry-${index}`}>
-                            <td className="py-3 px-4 font-bold text-slate-900">{entry.projectName || 'Project'}</td>
-                            <td className="py-3 px-4 font-semibold text-slate-900">{entry.taskTitle}</td>
-                            <td className="py-3 px-4 text-slate-600">{entry.details || '—'}</td>
-                            <td className="py-3 px-4 text-slate-700">{entry.actionTaken}</td>
-                            <td className="py-3 px-4 text-center whitespace-nowrap">{entry.date}</td>
-                            <td className="py-3 px-4 text-center font-bold">{formatHoursMinutes(entry.hours)}</td>
-                            <td className="py-3 px-4 text-center">
-                              {entry.flagged ? (
-                                <span className="text-amber-800 font-bold">Yes</span>
-                              ) : (
-                                <span className="text-slate-500">No</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
-                                entry.status === 'Completed'
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                  : entry.status === 'In Progress'
-                                    ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                    : 'bg-slate-100 text-slate-700 border-slate-300'
-                              }`}>
-                                {entry.status || '—'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              )}
-
-              {/* Submit Button Section */}
-              {dailyBoard.length > 0 && (
-                <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <p className="text-xs text-slate-500">
-                    * Make sure all required green entries (Action Taken & Hours) are filled accurately before submitting.
-                  </p>
-
-                  <button
-                    disabled={submitting}
-                    onClick={handleSubmitDailyBoard}
-                    className={`px-8 py-3 rounded-xl font-extrabold text-sm shadow-md transition flex items-center gap-2 cursor-pointer ${
-                      submitting
-                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-                        : 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
-                    }`}
-                  >
-                    <Save size={18} />
-                    <span>{submitting ? 'Submitting...' : 'SUBMIT DAILY ENTRY'}</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Available assigned tasks */}
-            <div id="available-tasks-section" className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-                <div>
-                  <h3 className="text-lg font-black text-[#172554]">Assigned Tasks</h3>
-                  <p className="text-xs text-slate-500">Select tasks to add them into your Daily Entry Task Board</p>
-                </div>
-
-                {/* Urgency Filter Category Buttons */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {['ALL', 'URGENT', 'LESS URGENT', 'LOW URGENT', 'SELF DEFINED', 'DAILY TASK'].map(urg => (
-                    <button
-                      key={urg}
-                      onClick={() => setUrgencyFilter(urg)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border cursor-pointer ${
-                        urgencyFilter === urg 
-                          ? 'bg-slate-900 text-white border-slate-900' 
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {urg}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {availableAssignedTasks.length === 0 ? (
-                <div className="py-10 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                  <ListTodo size={34} className="mx-auto text-slate-300 mb-2" />
-                  <p className="text-xs text-slate-500">No assigned tasks available in this category.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {availableAssignedTasks.map(t => {
-                    const taskId = t.id || t._id || '';
-                    const urgency = getUrgencyFromPriority(t.priority);
-                    const isAdded = dailyBoard.some(b => b.taskId === taskId) ||
-                      todayEntries.some(entry => entry.taskId === taskId);
-
-                    return (
-                      <div key={taskId} className="border border-slate-200 rounded-xl p-4 bg-white shadow-xs space-y-3 hover:border-indigo-200 transition">
-                        <div className="flex justify-between items-start">
-                          <span className={`px-2.5 py-0.5 text-[10px] font-black rounded ${
-                            urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
-                            urgency === 'LESS URGENT' ? 'bg-amber-100 text-amber-800' :
-                            urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
-                            urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
-                            'bg-indigo-100 text-indigo-800'
-                          }`}>
-                            {urgency}
+                <div className="w-full max-w-full overflow-x-auto">
+                  <table className="w-full min-w-[860px] table-fixed text-left border-collapse">
+                    <colgroup>
+                      <col className="w-[28%]" />
+                      <col className="w-[30%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[7%]" />
+                      <col className="w-[20%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-[#4472C4] text-white">
+                        <th colSpan={4} className="px-3 py-2 text-center text-base font-bold border border-white">
+                          Daily Entry Task Board
+                        </th>
+                        <th className="px-3 py-1.5 text-center font-bold border border-white">
+                          <span className="block text-base">Free Hours</span>
+                          <span className="inline-block mt-0.5 px-1.5 bg-[#D9D9D9] text-[#548235] text-sm font-bold">
+                            (8 - Today&apos;s Hours) {formatHoursMinutes(freeHours)}
                           </span>
-                          <span className="text-xs font-bold text-slate-500">{t.projectName}</span>
-                        </div>
-
-                        <div>
-                          <h4 className="font-bold text-slate-900 text-sm">{t.title}</h4>
-                          <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{t.description}</p>
-                        </div>
-
-                        <button
-                          disabled={isAdded}
-                          onClick={() => handleAddToDailyBoard({
-                            taskId,
-                            projectId: t.projectId,
-                            projectName: t.projectName || 'Project',
-                            taskTitle: t.title,
-                            details: t.description,
-                            urgency
-                          })}
-                          className={`w-full py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                            isAdded
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-not-allowed'
-                              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
-                          }`}
-                        >
-                          {isAdded ? (
-                            <>
-                              <Check size={14} />
-                              <span>Added to Board</span>
-                            </>
-                          ) : (
-                            <>
-                              <Plus size={14} />
-                              <span>Add to Daily Entry</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {boardBlockGroups.map(group => (
+                        <React.Fragment key={`board-project-${group.projectId}`}>
+                          <tr className="bg-[#B4C6E7]">
+                            <td colSpan={5} className="px-3 py-1.5 text-[15px] font-bold text-black border border-white">
+                              {group.projectName}
+                            </td>
+                          </tr>
+                          {group.items.map(block => (
+                            <React.Fragment key={block.key}>
+                              {renderBoardBlock(block)}
+                            </React.Fragment>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -1921,21 +1812,19 @@ const EmployeeDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {tasks.map(t => (
-                <div key={t.id || t._id} className="border border-slate-200 rounded-xl p-5 bg-white shadow-xs space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-[11px] px-2.5 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                      {t.priority}
-                    </span>
-                    <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-slate-100 text-slate-700">
-                      {t.status}
-                    </span>
-                  </div>
-
-                  <h4 className="font-bold text-slate-900 text-sm">{t.title}</h4>
-                  <p className="text-xs text-slate-500">Project: <span className="font-bold text-slate-700">{t.projectName}</span></p>
-                  <p className="text-xs text-slate-600">{t.description}</p>
+            <div className="space-y-6">
+              {groupedEmployeeTasks.map(group => (
+                <div key={group.projectId} className="space-y-2">
+                  <h4 className="text-sm font-bold text-[#172554]">{group.projectName}</h4>
+                  <ul className="space-y-1">
+                    {group.items.map(t => (
+                      <li key={t.id || t._id} className="flex items-start gap-2 text-sm text-slate-800">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#2563EB] flex-shrink-0" />
+                        <span className="flex-1">{t.title}</span>
+                        <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-slate-100 text-slate-700">{t.status}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ))}
             </div>
@@ -2560,6 +2449,7 @@ const EmployeeDashboard: React.FC = () => {
 
         {/* TAB 7: PROFILE */}
         {activeTab === 'profile' && <EmployeeProfile />}
+        </div>
 
         {/* Task Removal Confirmation Modal */}
         {removeTargetId && (

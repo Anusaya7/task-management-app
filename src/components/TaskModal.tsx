@@ -46,6 +46,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ title?: string; projectId?: string; employees?: string; projectTasks?: string }>({});
   const [selectedRemarkKeys, setSelectedRemarkKeys] = useState<string[]>([]);
+  const [taskRequirements, setTaskRequirements] = useState<Record<string, string>>({});
+  const [parentTaskId, setParentTaskId] = useState('');
   const employeeMenuRef = useRef<HTMLDivElement | null>(null);
   const submitLockRef = useRef(false);
 
@@ -59,6 +61,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setPriority(task.priority && task.priority !== 'Self' ? task.priority : 'Urgent');
       setSelectedEmployeeIds(Array.from(new Set(task.assignedEmployeeIds || [])));
       setReminderDate(task.reminderDate ? task.reminderDate.substring(0, 10) : '');
+      setParentTaskId(task.parentTaskId || '');
     } else {
       setTitle('');
       setDescription('');
@@ -66,10 +69,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setPriority(isEmployee ? 'Self' : 'Urgent');
       setSelectedEmployeeIds(isEmployee && user?.id ? [user.id] : []);
       setReminderDate('');
+      setParentTaskId('');
     }
     setError('');
     setFieldErrors({});
     setSelectedRemarkKeys([]);
+    setTaskRequirements({});
     setEmployeeSearch('');
     setIsEmployeeMenuOpen(false);
     setIsSubmitting(false);
@@ -141,7 +146,19 @@ const TaskModal: React.FC<TaskModalProps> = ({
     return options;
   }, [selectedProject, existingTasks, projectId]);
 
+  const parentTaskOptions = useMemo(() => {
+    if (!projectId) return [] as Task[];
+    const currentId = task ? String(task.id || (task as any)._id || '') : '';
+    return existingTasks.filter(item =>
+      String(item.projectId) === String(projectId) &&
+      item.priority !== 'Self' &&
+      !item.parentTaskId &&
+      String(item.id || item._id || '') !== currentId
+    );
+  }, [existingTasks, projectId, task]);
+
   const showProjectTaskList = !isEmployee && !task;
+  const hideTitleField = showProjectTaskList;
 
   const getEmpId = (emp: Employee) => emp.id || emp._id || '';
   const getEmpName = (emp: Employee) => `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
@@ -179,8 +196,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
     e.preventDefault();
     if (submitLockRef.current || isSubmitting) return;
 
-    const trimmedTitle = title.trim();
-    const selectedItems = projectTaskOptions.filter(item => selectedRemarkKeys.includes(item.key));
+    const trimmedTitle = hideTitleField ? '' : title.trim();
+    const selectedItems = projectTaskOptions
+      .filter(item => selectedRemarkKeys.includes(item.key))
+      .map(item => ({ ...item, requirement: (taskRequirements[item.key] || '').trim() }));
     const nextErrors: { title?: string; projectId?: string; employees?: string; projectTasks?: string } = {};
 
     if (!projectId) nextErrors.projectId = 'Please select a Project.';
@@ -188,9 +207,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
     if (task || isEmployee) {
       if (!trimmedTitle) nextErrors.title = 'Task Title is required.';
     } else if (selectedItems.length === 0 && !trimmedTitle) {
-      nextErrors.title = 'Task Title is required.';
-      if (projectTaskOptions.length > 0) {
-        nextErrors.projectTasks = 'Please select at least one project task, or enter a Task Title.';
+      if (hideTitleField) {
+        nextErrors.projectTasks = 'Please select at least one project task.';
+      } else {
+        nextErrors.title = 'Task Title is required.';
       }
     }
 
@@ -211,6 +231,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
         priority: isEmployee ? 'Self' : priority,
         assignedEmployeeIds: isEmployee && user?.id ? [user.id] : Array.from(new Set(selectedEmployeeIds)),
         reminderDate: reminderDate || undefined,
+        dueDate: reminderDate || undefined,
+        parentTaskId: !isEmployee && parentTaskId ? parentTaskId : undefined,
         selectedProjectTasks: !isEmployee && !task && selectedItems.length > 0 ? selectedItems : undefined
       });
       onClose();
@@ -266,6 +288,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   onChange={(e) => {
                     setProjectId(e.target.value);
                     setSelectedRemarkKeys([]);
+                    setTaskRequirements({});
+                    setParentTaskId('');
                     if (fieldErrors.projectId) setFieldErrors(prev => ({ ...prev, projectId: undefined, projectTasks: undefined }));
                   }}
                   className={inputClass(fieldErrors.projectId)}
@@ -315,19 +339,18 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 </div>
                 {projectTaskOptions.length === 0 ? (
                   <p className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-medium text-slate-500">
-                    No saved tasks/remarks for this project yet. Add remarks in Create Project, or enter a Task Title.
+                    No saved tasks for this project yet. Add tasks to this project from the Projects page first.
                   </p>
                 ) : (
-                  <div className={`max-h-60 space-y-1 overflow-y-auto rounded-lg border bg-white p-2 ${fieldErrors.projectTasks ? 'border-rose-400' : 'border-slate-300'}`}>
+                  <div className={`max-h-96 space-y-1 overflow-y-auto rounded-lg border bg-white p-2 ${fieldErrors.projectTasks ? 'border-rose-400' : 'border-slate-300'}`}>
                     {projectTaskOptions.map(item => {
                       const checked = selectedRemarkKeys.includes(item.key);
                       return (
-                        <label
+                        <div
                           key={item.key}
-                          className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-sm transition ${
-                            checked ? 'bg-blue-50 text-blue-900' : 'text-slate-700 hover:bg-slate-50'
-                          }`}
+                          className={`rounded-md transition ${checked ? 'bg-blue-50 text-blue-900' : 'text-slate-700 hover:bg-slate-50'}`}
                         >
+                        <label className="flex cursor-pointer items-start gap-2.5 px-2 py-1.5 text-sm">
                           <input
                             type="checkbox"
                             checked={checked}
@@ -348,6 +371,24 @@ const TaskModal: React.FC<TaskModalProps> = ({
                             )}
                           </span>
                         </label>
+                        {checked && (
+                          <div className="px-2 pb-2 pl-8">
+                            <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+                              Requirement for {item.title}
+                            </label>
+                            <textarea
+                              value={taskRequirements[item.key] || ''}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setTaskRequirements(prev => ({ ...prev, [item.key]: value }));
+                              }}
+                              rows={2}
+                              placeholder={`What exactly needs to be done in ${item.title}?`}
+                              className="w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                            />
+                          </div>
+                        )}
+                        </div>
                       );
                     })}
                   </div>
@@ -356,6 +397,33 @@ const TaskModal: React.FC<TaskModalProps> = ({
               </div>
             )}
 
+            {!isEmployee && projectId && (
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Parent Task (optional)
+                </label>
+                <select
+                  value={parentTaskId}
+                  onChange={(e) => setParentTaskId(e.target.value)}
+                  className={inputClass()}
+                >
+                  <option value="">-- None (top-level task) --</option>
+                  {parentTaskOptions.map(item => {
+                    const id = String(item.id || item._id || '');
+                    return (
+                      <option key={id} value={id}>
+                        {item.title}
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="mt-1 text-[11px] font-medium text-slate-500">
+                  Optional: pick an existing main task to add the selected tasks under it.
+                </p>
+              </div>
+            )}
+
+            {!hideTitleField && (
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                 {showProjectTaskList ? 'Task Title' : 'Task Title *'}
@@ -372,6 +440,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
               />
               {fieldErrors.title && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.title}</p>}
             </div>
+            )}
 
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
@@ -495,20 +564,20 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                Task Description
+                {showProjectTaskList ? 'Common Description (optional)' : 'Task Description'}
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={4}
-                placeholder="Enter task details..."
+                placeholder={showProjectTaskList ? 'Used for selected tasks that have no requirement written above' : 'Enter task details...'}
                 className={`${inputClass()} min-h-[96px] resize-y`}
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                Reminder Date (Optional)
+                Due Date / Reminder Date (Optional)
               </label>
               <input
                 type="date"

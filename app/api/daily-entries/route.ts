@@ -261,60 +261,79 @@ export async function POST(req: Request) {
 
       if (item.flagged) {
         const concernedPersonId = typeof item.concernedPersonId === 'string' ? item.concernedPersonId.trim() : ''
-        if (/^[a-f\d]{24}$/i.test(concernedPersonId)) {
-          const concerned = await Employee.findById(concernedPersonId).select('_id firstName lastName role')
-          if (concerned) {
-            const existingOpen = await Flag.findOne({
-              taskId: entry.taskId,
-              createdBy: user._id.toString(),
-              concernedPersonId: concerned._id.toString(),
-              status: 'Open'
-            })
-            if (!existingOpen) {
-              const creatorName = `${user.firstName} ${user.lastName}`
-              await Flag.create({
-                taskId: entry.taskId,
-                taskTitle: taskTitleStr,
-                projectId: entry.projectId,
-                projectName: entry.projectName,
-                employeeId: user._id.toString(),
-                employeeName: creatorName,
-                createdBy: user._id.toString(),
-                createdByName: creatorName,
-                createdByRole: user.role,
-                concernedPersonId: concerned._id.toString(),
-                concernedPersonName: `${concerned.firstName} ${concerned.lastName}`,
-                flagType: item.flagType || 'Needs Attention',
-                flagMessage: (item.flagComment || '').trim(),
-                flagDate: todayDate,
-                status: 'Open'
-              })
-              if (concerned._id.toString() !== user._id.toString()) {
-                await sendNotifications({
-                  recipientUserId: concerned._id.toString(),
-                  type: 'TASK_FLAGGED',
-                  title: `${creatorName} assigned a flag`,
-                  message: `${creatorName} flagged '${taskTitleStr}': ${(item.flagComment || '').trim()}`,
-                  taskId: entry.taskId,
-                  projectId: entry.projectId,
-                  relatedUserId: user._id.toString(),
-                  relatedUserName: creatorName
-                })
-              }
+        const creatorName = `${user.firstName} ${user.lastName}`
+        const flagMessage = (item.flagComment || '').trim() || 'Flagged as blocker/urgent'
+        const existingOpen = await Flag.findOne({
+          taskId: entry.taskId,
+          createdBy: user._id.toString(),
+          status: 'Open'
+        })
+
+        if (!existingOpen) {
+          let concernedId = ''
+          let concernedName = ''
+          if (/^[a-f\d]{24}$/i.test(concernedPersonId)) {
+            const concerned = await Employee.findById(concernedPersonId).select('_id firstName lastName role')
+            if (concerned) {
+              concernedId = concerned._id.toString()
+              concernedName = `${concerned.firstName} ${concerned.lastName}`
             }
           }
+
+          await Flag.create({
+            taskId: entry.taskId,
+            taskTitle: taskTitleStr,
+            projectId: entry.projectId,
+            projectName: entry.projectName,
+            employeeId: user._id.toString(),
+            employeeName: creatorName,
+            createdBy: user._id.toString(),
+            createdByName: creatorName,
+            createdByRole: user.role,
+            concernedPersonId: concernedId || undefined,
+            concernedPersonName: concernedName || undefined,
+            flagType: item.flagType || 'Needs Attention',
+            flagMessage,
+            flagDate: todayDate,
+            status: 'Open'
+          })
+
+          if (concernedId && concernedId !== user._id.toString()) {
+            await sendNotifications({
+              recipientUserId: concernedId,
+              type: 'TASK_FLAGGED',
+              title: `${creatorName} assigned a flag`,
+              message: `${creatorName} flagged '${taskTitleStr}': ${flagMessage}`,
+              taskId: entry.taskId,
+              projectId: entry.projectId,
+              relatedUserId: user._id.toString(),
+              relatedUserName: creatorName
+            })
+          }
+
+          await sendNotifications({
+            recipientRoles: ['Director', 'Project Head'],
+            projectId: entry.projectId,
+            employeeId: user._id.toString(),
+            type: 'TASK_FLAGGED',
+            title: `Task flagged: ${taskTitleStr}`,
+            message: `${creatorName} flagged '${taskTitleStr}' in ${entry.projectName || 'Project'}: ${flagMessage}`,
+            taskId: entry.taskId,
+            relatedUserId: user._id.toString(),
+            relatedUserName: creatorName
+          })
         }
       }
 
       if (user.role === 'Employee') {
         const empName = `${user.firstName} ${user.lastName}`
         await sendNotifications({
-          recipientRoles: ['Director'],
+          recipientRoles: ['Director', 'Project Head'],
           projectId: item.projectId,
           employeeId: user._id.toString(),
           type: 'DAILY_WORK_SUBMITTED',
           title: `Daily Work Submitted: ${empName}`,
-          message: `${empName} submitted daily work for ${item.projectName || 'Project'}: '${taskTitleStr}' (${item.hours || 1} hrs)`,
+          message: `${empName} submitted daily work for ${item.projectName || 'Project'}: '${taskTitleStr}' (${item.hours || 1} hrs) — ${actionTakenStr}`,
           taskId: item.taskId,
           relatedUserId: user._id.toString(),
           relatedUserName: empName

@@ -121,6 +121,9 @@ export interface Task {
   flagMessage?: string;
   flagDate?: string;
   dueDate?: string;
+  parentTaskId?: string;
+  parentTaskTitle?: string;
+  estimatedHours?: number;
   rating?: number; // Director only (1-5)
   privateComment?: string; // Director only
   employeeRemark?: string;
