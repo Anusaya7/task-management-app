@@ -50,6 +50,14 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (body.status) project.status = persistProjectStatus(body.status)
     if (Array.isArray(body.projectRemarks)) {
       project.projectRemarks = body.projectRemarks
+        .filter((item: any) => item && String(item.remark || '').trim())
+        .map((item: any) => ({
+          ...(item._id ? { _id: item._id } : {}),
+          date: item.date || getTodayKolkata(),
+          remark: String(item.remark).trim(),
+          createdBy: item.createdBy || user._id.toString()
+        }))
+      project.markModified('projectRemarks')
     }
 
     if (body.newRemark) {

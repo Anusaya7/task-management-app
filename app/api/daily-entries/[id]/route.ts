@@ -84,7 +84,13 @@ export async function PUT(
     }
     if (body.flagged !== undefined) entry.flagged = Boolean(body.flagged)
     if (body.flagComment !== undefined) entry.flagComment = body.flagComment.trim()
-    if (body.status !== undefined) entry.status = body.status
+    if (body.status !== undefined) {
+      const nextStatus = typeof body.status === 'string' ? body.status.trim() : ''
+      if (nextStatus !== 'In Progress' && nextStatus !== 'Completed') {
+        return NextResponse.json({ error: 'Please select task status before submitting.' }, { status: 400 })
+      }
+      entry.status = nextStatus
+    }
 
     entry.updatedAt = new Date()
     await entry.save()

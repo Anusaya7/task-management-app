@@ -63,9 +63,15 @@ export async function POST(req: Request) {
     }
 
     const today = getTodayKolkata()
-    const remarks = Array.isArray(projectRemarks) ? projectRemarks : []
+    const remarks = (Array.isArray(projectRemarks) ? projectRemarks : [])
+      .filter((item: any) => item && String(item.remark || '').trim())
+      .map((item: any) => ({
+        date: item.date || today,
+        remark: String(item.remark).trim(),
+        createdBy: item.createdBy || user._id.toString()
+      }))
     if (remarks.length === 0 && body.initialRemark) {
-      remarks.push({ date: today, remark: body.initialRemark, createdBy: user._id.toString() })
+      remarks.push({ date: today, remark: String(body.initialRemark).trim(), createdBy: user._id.toString() })
     }
 
     const newProject = await Project.create({

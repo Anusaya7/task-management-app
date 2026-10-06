@@ -26,6 +26,7 @@ export interface User {
 }
 
 export interface ProjectRemark {
+  _id?: string;
   date: string;
   remark: string;
   createdBy?: string;

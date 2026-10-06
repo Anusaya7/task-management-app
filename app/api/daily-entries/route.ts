@@ -145,6 +145,11 @@ export async function POST(req: Request) {
       if (item.flagged === undefined || item.flagged === null) {
         return NextResponse.json({ error: 'Please select Flag before submitting.' }, { status: 400 })
       }
+      const selectedStatus = typeof item.status === 'string' ? item.status.trim() : ''
+      if (selectedStatus !== 'In Progress' && selectedStatus !== 'Completed') {
+        return NextResponse.json({ error: 'Please select task status before submitting.' }, { status: 400 })
+      }
+      item._selectedStatus = selectedStatus
 
       totalSubmittedHours += parsedHours.hours
     }
@@ -200,7 +205,7 @@ export async function POST(req: Request) {
         hours: Number(item._parsedHours ?? item.hours),
         flagged: Boolean(item.flagged),
         flagComment: item.flagged ? (item.flagComment ? item.flagComment.trim() : '') : '',
-        status: item.status || 'Submitted'
+        status: item._selectedStatus
       })
 
       // Update linked task progress if taskId belongs to a real task

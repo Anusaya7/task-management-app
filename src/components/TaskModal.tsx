@@ -9,6 +9,7 @@ interface TaskModalProps {
   task?: Task | null;
   projects: Project[];
   employees: Employee[];
+  existingTasks?: Task[];
   isOpen: boolean;
   onClose: () => void;
   onSave: (taskData: any) => Promise<void>;
@@ -26,6 +27,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   task,
   projects,
   employees,
+  existingTasks = [],
   isOpen,
   onClose,
   onSave,
@@ -42,7 +44,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [reminderDate, setReminderDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<{ title?: string; projectId?: string; employees?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ title?: string; projectId?: string; employees?: string; projectTasks?: string }>({});
+  const [selectedRemarkKeys, setSelectedRemarkKeys] = useState<string[]>([]);
   const employeeMenuRef = useRef<HTMLDivElement | null>(null);
   const submitLockRef = useRef(false);
 
@@ -66,6 +69,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
     }
     setError('');
     setFieldErrors({});
+    setSelectedRemarkKeys([]);
     setEmployeeSearch('');
     setIsEmployeeMenuOpen(false);
     setIsSubmitting(false);
@@ -96,6 +100,48 @@ const TaskModal: React.FC<TaskModalProps> = ({
     () => employees.filter(emp => emp.role === 'Employee' && emp.status !== 'Inactive'),
     [employees]
   );
+
+  const projectKey = (project: Project) => String(project.id || project._id || '');
+
+  const selectedProject = useMemo(
+    () => projects.find(p => projectKey(p) === String(projectId)) || null,
+    [projects, projectId]
+  );
+
+  const projectTaskOptions = useMemo(() => {
+    if (!selectedProject) return [] as Array<{ key: string; title: string; date?: string }>;
+    const remarks = selectedProject.projectRemarks || [];
+    const options: Array<{ key: string; title: string; date?: string }> = [];
+    const remarkTitles = new Set<string>();
+
+    remarks.forEach((remark, index) => {
+      const title = (remark.remark || '').trim();
+      if (!title) return;
+      const remarkId = remark._id ? String(remark._id) : '';
+      const key = remarkId && remarkId !== '[object Object]'
+        ? `remark-${remarkId}`
+        : `remark-${index}-${remark.date || ''}-${title}`;
+      options.push({ key, title, date: remark.date });
+      remarkTitles.add(title.toLowerCase());
+    });
+
+    existingTasks
+      .filter(item => String(item.projectId) === String(projectId) && item.priority !== 'Self')
+      .forEach(item => {
+        const title = (item.title || '').trim();
+        if (!title) return;
+        if (remarkTitles.has(title.toLowerCase())) return;
+        options.push({
+          key: `task-${item.id || item._id || title}`,
+          title,
+          date: item.createdAt ? String(item.createdAt).substring(0, 10) : undefined
+        });
+      });
+
+    return options;
+  }, [selectedProject, existingTasks, projectId]);
+
+  const showProjectTaskList = !isEmployee && !task;
 
   const getEmpId = (emp: Employee) => emp.id || emp._id || '';
   const getEmpName = (emp: Employee) => `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
@@ -134,15 +180,23 @@ const TaskModal: React.FC<TaskModalProps> = ({
     if (submitLockRef.current || isSubmitting) return;
 
     const trimmedTitle = title.trim();
-    const nextErrors: { title?: string; projectId?: string; employees?: string } = {};
+    const selectedItems = projectTaskOptions.filter(item => selectedRemarkKeys.includes(item.key));
+    const nextErrors: { title?: string; projectId?: string; employees?: string; projectTasks?: string } = {};
 
-    if (!trimmedTitle) nextErrors.title = 'Task Title is required.';
     if (!projectId) nextErrors.projectId = 'Please select a Project.';
     if (!isEmployee && selectedEmployeeIds.length === 0) nextErrors.employees = 'Please select at least one employee.';
+    if (task || isEmployee) {
+      if (!trimmedTitle) nextErrors.title = 'Task Title is required.';
+    } else if (selectedItems.length === 0 && !trimmedTitle) {
+      nextErrors.title = 'Task Title is required.';
+      if (projectTaskOptions.length > 0) {
+        nextErrors.projectTasks = 'Please select at least one project task, or enter a Task Title.';
+      }
+    }
 
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
-      setError(nextErrors.title || nextErrors.projectId || nextErrors.employees || 'Please complete the required fields.');
+      setError(nextErrors.projectId || nextErrors.projectTasks || nextErrors.title || nextErrors.employees || 'Please complete the required fields.');
       return;
     }
 
@@ -156,7 +210,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
         projectId,
         priority: isEmployee ? 'Self' : priority,
         assignedEmployeeIds: isEmployee && user?.id ? [user.id] : Array.from(new Set(selectedEmployeeIds)),
-        reminderDate: reminderDate || undefined
+        reminderDate: reminderDate || undefined,
+        selectedProjectTasks: !isEmployee && !task && selectedItems.length > 0 ? selectedItems : undefined
       });
       onClose();
     } catch (err: any) {
@@ -201,23 +256,6 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                Task Title *
-              </label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                  if (fieldErrors.title) setFieldErrors(prev => ({ ...prev, title: undefined }));
-                }}
-                placeholder="Enter task title"
-                className={inputClass(fieldErrors.title)}
-              />
-              {fieldErrors.title && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.title}</p>}
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                 Project *
               </label>
               {dataLoading && projects.length === 0 ? (
@@ -227,22 +265,112 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   value={projectId}
                   onChange={(e) => {
                     setProjectId(e.target.value);
-                    if (fieldErrors.projectId) setFieldErrors(prev => ({ ...prev, projectId: undefined }));
+                    setSelectedRemarkKeys([]);
+                    if (fieldErrors.projectId) setFieldErrors(prev => ({ ...prev, projectId: undefined, projectTasks: undefined }));
                   }}
                   className={inputClass(fieldErrors.projectId)}
                 >
                   <option value="">{projects.length === 0 ? 'No projects available' : '-- Select Project --'}</option>
-                  {projects.map(p => (
-                    <option key={p.id || p._id} value={p.id || p._id}>
-                      {p.projectName} ({p.projectNumber})
-                    </option>
-                  ))}
+                  {projects.map(p => {
+                    const id = projectKey(p);
+                    return (
+                      <option key={id} value={id}>
+                        {p.projectName} ({p.projectNumber})
+                      </option>
+                    );
+                  })}
                 </select>
               )}
               {projects.length === 0 && !dataLoading && (
                 <p className="mt-1 text-[11px] font-semibold text-amber-600">No projects available</p>
               )}
               {fieldErrors.projectId && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.projectId}</p>}
+            </div>
+
+            {showProjectTaskList && projectId && (
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    Tasks for {selectedProject?.projectName || 'Selected Project'}
+                    {projectTaskOptions.length > 0 && (
+                      <span className="ml-1 normal-case tracking-normal text-slate-500">
+                        ({projectTaskOptions.length})
+                      </span>
+                    )}
+                  </label>
+                  {projectTaskOptions.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allKeys = projectTaskOptions.map(item => item.key);
+                        const allSelected = allKeys.every(key => selectedRemarkKeys.includes(key));
+                        setSelectedRemarkKeys(allSelected ? [] : allKeys);
+                        setFieldErrors(prev => ({ ...prev, projectTasks: undefined, title: undefined }));
+                      }}
+                      className="text-[11px] font-semibold text-[#2563EB] hover:underline"
+                    >
+                      {projectTaskOptions.every(item => selectedRemarkKeys.includes(item.key)) ? 'Clear all' : 'Select all'}
+                    </button>
+                  )}
+                </div>
+                {projectTaskOptions.length === 0 ? (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-medium text-slate-500">
+                    No saved tasks/remarks for this project yet. Add remarks in Create Project, or enter a Task Title.
+                  </p>
+                ) : (
+                  <div className={`max-h-60 space-y-1 overflow-y-auto rounded-lg border bg-white p-2 ${fieldErrors.projectTasks ? 'border-rose-400' : 'border-slate-300'}`}>
+                    {projectTaskOptions.map(item => {
+                      const checked = selectedRemarkKeys.includes(item.key);
+                      return (
+                        <label
+                          key={item.key}
+                          className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-sm transition ${
+                            checked ? 'bg-blue-50 text-blue-900' : 'text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedRemarkKeys(prev =>
+                                prev.includes(item.key) ? prev.filter(key => key !== item.key) : [...prev, item.key]
+                              );
+                              if (fieldErrors.projectTasks || fieldErrors.title) {
+                                setFieldErrors(prev => ({ ...prev, projectTasks: undefined, title: undefined }));
+                              }
+                            }}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-semibold">{item.title}</span>
+                            {item.date && (
+                              <span className="block text-[11px] font-medium text-slate-500">{item.date}</span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {fieldErrors.projectTasks && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.projectTasks}</p>}
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                {showProjectTaskList ? 'Task Title' : 'Task Title *'}
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  if (fieldErrors.title) setFieldErrors(prev => ({ ...prev, title: undefined }));
+                }}
+                placeholder={showProjectTaskList ? 'Optional extra task, or skip if you selected tasks above' : 'Enter task title'}
+                className={inputClass(fieldErrors.title)}
+              />
+              {fieldErrors.title && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.title}</p>}
             </div>
 
             <div>

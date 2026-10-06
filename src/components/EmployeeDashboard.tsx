@@ -124,7 +124,7 @@ interface BoardTask {
   concernedPersonId: string;
   concernedPersonName: string;
   workDone: number; // 10-100%
-  status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked';
+  status: '' | 'In Progress' | 'Completed';
   urgency: 'URGENT' | 'LESS URGENT' | 'LOW URGENT' | 'SELF DEFINED' | 'DAILY TASK';
 }
 
@@ -177,7 +177,7 @@ const EmployeeDashboard: React.FC = () => {
   const [dailyBoard, setDailyBoard] = useState<BoardTask[]>([]);
   
   // Validation Errors state per board item ID
-  const [fieldErrors, setFieldErrors] = useState<Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string }>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string; status?: string }>>({});
   const [boardGlobalError, setBoardGlobalError] = useState<string | null>(null);
 
   // Task Removal Confirmation Modal State
@@ -496,7 +496,7 @@ const EmployeeDashboard: React.FC = () => {
       concernedPersonId: '',
       concernedPersonName: '',
       workDone: 50,
-      status: 'In Progress',
+      status: '',
       urgency: taskItem.urgency || 'SELF DEFINED'
     };
 
@@ -536,7 +536,7 @@ const EmployeeDashboard: React.FC = () => {
       concernedPersonId: '',
       concernedPersonName: '',
       workDone: 50,
-      status: 'In Progress',
+      status: '',
       urgency: urgencyLabelMap[taskItem.category]
     };
 
@@ -702,7 +702,7 @@ const EmployeeDashboard: React.FC = () => {
       concernedPersonId: '',
       concernedPersonName: '',
       workDone: 0,
-      status: 'In Progress',
+      status: '',
       urgency: 'SELF DEFINED'
     };
 
@@ -741,6 +741,7 @@ const EmployeeDashboard: React.FC = () => {
       if (updates.hours !== undefined) delete copy[boardId]?.hours;
       if (updates.flagged !== undefined) delete copy[boardId]?.flagged;
       if (updates.flagComment !== undefined) delete copy[boardId]?.flagComment;
+      if (updates.status !== undefined) delete copy[boardId]?.status;
       return copy;
     });
     setBoardGlobalError(null);
@@ -756,12 +757,12 @@ const EmployeeDashboard: React.FC = () => {
     }
 
     // Perform complete Page 3 validation
-    const newErrors: Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string }> = {};
+    const newErrors: Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string; status?: string }> = {};
     let hasValidationFailure = false;
     let missingFieldMsg = '';
 
     for (const item of dailyBoard) {
-      const itemErr: { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string } = {};
+      const itemErr: { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string; status?: string } = {};
 
       if (!item.actionTaken || !item.actionTaken.trim()) {
         itemErr.actionTaken = 'Please enter Action Taken.';
@@ -784,6 +785,12 @@ const EmployeeDashboard: React.FC = () => {
       if (item.flagged === undefined || item.flagged === null) {
         itemErr.flagged = 'Please select Flag before submitting.';
         if (!missingFieldMsg) missingFieldMsg = 'Please select Flag before submitting.';
+        hasValidationFailure = true;
+      }
+
+      if (item.status !== 'In Progress' && item.status !== 'Completed') {
+        itemErr.status = 'Please select task status before submitting.';
+        if (!missingFieldMsg) missingFieldMsg = 'Please select task status before submitting.';
         hasValidationFailure = true;
       }
 
@@ -1542,7 +1549,7 @@ const EmployeeDashboard: React.FC = () => {
                 </div>
               ) : dailyBoard.length > 0 ? (
                 <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
-                  <table className="w-full text-left border-collapse min-w-[1100px]">
+                  <table className="w-full text-left border-collapse min-w-[1250px]">
                     <thead>
                       <tr className="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10">
                         <th className="py-3.5 px-4 w-[10%] rounded-tl-xl">Project</th>
@@ -1558,6 +1565,7 @@ const EmployeeDashboard: React.FC = () => {
                           Hours * (Green Entry)
                         </th>
                         <th className="py-3.5 px-4 w-[8%] text-center">Progress %</th>
+                        <th className="py-3.5 px-4 w-[12%] text-center">Status *</th>
                         <th className="py-3.5 px-4 w-[16%] text-center">Flag * (Yes/No)</th>
                         <th className="py-3.5 px-4 text-center rounded-tr-xl">Remove</th>
                       </tr>
@@ -1659,6 +1667,31 @@ const EmployeeDashboard: React.FC = () => {
                               </select>
                             </td>
 
+                            {/* Status (Required Selection In Progress / Completed) */}
+                            <td className="py-3.5 px-4 align-top min-w-[140px]">
+                              <div className="space-y-1">
+                                <select
+                                  value={item.status}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    updateBoardItem(item.boardId, {
+                                      status: val === 'In Progress' || val === 'Completed' ? val : ''
+                                    });
+                                  }}
+                                  className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-bold transition focus:outline-none ${
+                                    errs?.status ? 'bg-rose-50 border-rose-400 text-rose-900 focus:ring-2 focus:ring-rose-500' : 'bg-white border-slate-300 text-slate-800'
+                                  }`}
+                                >
+                                  <option value="">-- Select Status * --</option>
+                                  <option value="In Progress">In Progress</option>
+                                  <option value="Completed">Completed</option>
+                                </select>
+                                {errs?.status && (
+                                  <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.status}</p>
+                                )}
+                              </div>
+                            </td>
+
                             {/* Flag (Required Selection Yes / No) */}
                             <td className="py-3.5 px-4 align-top min-w-[140px]">
                               <div className="space-y-1">
@@ -1720,6 +1753,7 @@ const EmployeeDashboard: React.FC = () => {
                           <th className="py-3 px-4 text-center">Date</th>
                           <th className="py-3 px-4 text-center">Hours</th>
                           <th className="py-3 px-4 text-center">Flag</th>
+                          <th className="py-3 px-4 text-center">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-xs">
@@ -1737,6 +1771,17 @@ const EmployeeDashboard: React.FC = () => {
                               ) : (
                                 <span className="text-slate-500">No</span>
                               )}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
+                                entry.status === 'Completed'
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : entry.status === 'In Progress'
+                                    ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                    : 'bg-slate-100 text-slate-700 border-slate-300'
+                              }`}>
+                                {entry.status || '—'}
+                              </span>
                             </td>
                           </tr>
                         ))}

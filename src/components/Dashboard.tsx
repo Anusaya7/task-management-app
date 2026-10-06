@@ -495,6 +495,37 @@ const Dashboard: React.FC = () => {
   const handleSaveTask = async (taskData: any) => {
     try {
       const isEdit = !!selectedTask;
+      const selectedProjectTasks = Array.isArray(taskData.selectedProjectTasks) ? taskData.selectedProjectTasks : [];
+
+      if (!isEdit && selectedProjectTasks.length > 0) {
+        const extraTitle = typeof taskData.title === 'string' ? taskData.title.trim() : '';
+        const payloads = [...selectedProjectTasks];
+        if (extraTitle && !payloads.some((item: any) => String(item.title || '').trim().toLowerCase() === extraTitle.toLowerCase())) {
+          payloads.push({ title: extraTitle });
+        }
+        for (const item of payloads) {
+          const res = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: item.title,
+              description: taskData.description || item.title,
+              projectId: taskData.projectId,
+              priority: taskData.priority,
+              assignedEmployeeIds: taskData.assignedEmployeeIds,
+              reminderDate: taskData.reminderDate
+            })
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || 'Failed to save task');
+          }
+        }
+        showToast('success', payloads.length > 1 ? 'Selected tasks assigned successfully.' : 'Task assigned successfully.');
+        fetchData();
+        return;
+      }
+
       const url = isEdit ? `/api/tasks/${selectedTask?.id || selectedTask?._id}` : '/api/tasks';
       const method = isEdit ? 'PUT' : 'POST';
 
@@ -1179,7 +1210,13 @@ const Dashboard: React.FC = () => {
                           )}
                         </td>
                         <td className="p-3.5 text-center align-top">
-                          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
+                            entry.status === 'Completed'
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              : entry.status === 'In Progress'
+                                ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                : 'bg-slate-100 text-slate-700 border-slate-300'
+                          }`}>
                             {entry.status || 'Submitted'}
                           </span>
                         </td>
@@ -1333,7 +1370,13 @@ const Dashboard: React.FC = () => {
                           )}
                         </td>
                         <td className="p-3.5 text-center">
-                          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
+                            entry.status === 'Completed'
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              : entry.status === 'In Progress'
+                                ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                : 'bg-slate-100 text-slate-700 border-slate-300'
+                          }`}>
                             {entry.status || 'Submitted'}
                           </span>
                         </td>
@@ -1944,6 +1987,7 @@ const Dashboard: React.FC = () => {
           task={selectedTask}
           projects={projects}
           employees={employees}
+          existingTasks={tasks}
           onClose={() => setIsTaskModalOpen(false)}
           onSave={handleSaveTask}
           dataLoading={loading}

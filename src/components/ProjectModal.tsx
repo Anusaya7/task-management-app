@@ -1,9 +1,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react';
-import { Project, ProjectStatus } from '../types';
+import { Project, ProjectRemark, ProjectStatus } from '../types';
 import { X, Save, Plus, Trash2, AlertCircle } from 'lucide-react';
-import { getTodayKolkata } from '@/lib/auth';
 import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectModalProps {
@@ -30,10 +29,17 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   const [description, setDescription] = useState('');
   const [contactDetails, setContactDetails] = useState('');
   const [status, setStatus] = useState<ProjectStatus>('Ongoing');
-  const [remarks, setRemarks] = useState<{ date: string; remark: string }[]>([]);
+  const [remarks, setRemarks] = useState<ProjectRemark[]>([]);
   const [newRemarkText, setNewRemarkText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const todayKolkata = () => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
 
   useEffect(() => {
     if (!isOpen) return;
@@ -45,7 +51,12 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       setDescription(project.description || '');
       setContactDetails(project.contactDetails || '');
       setStatus(normalizeProjectStatus(project.status));
-      setRemarks(project.projectRemarks || []);
+      setRemarks((project.projectRemarks || []).map((item) => ({
+        _id: item._id,
+        date: item.date,
+        remark: item.remark,
+        createdBy: item.createdBy
+      })));
     } else {
       setProjectName('');
       setProjectNumber('');
@@ -62,14 +73,14 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   if (!isOpen) return null;
 
   const handleAddRemark = () => {
-    if (!newRemarkText.trim()) return;
-    const todayStr = new Date().toISOString().substring(0, 10);
-    setRemarks([...remarks, { date: todayStr, remark: newRemarkText.trim() }]);
+    const text = newRemarkText.trim();
+    if (!text) return;
+    setRemarks(prev => [...prev, { date: todayKolkata(), remark: text }]);
     setNewRemarkText('');
   };
 
   const handleRemoveRemark = (index: number) => {
-    setRemarks(remarks.filter((_, i) => i !== index));
+    setRemarks(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -89,6 +100,11 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       return;
     }
 
+    const pendingRemark = newRemarkText.trim();
+    const allRemarks = pendingRemark
+      ? [...remarks, { date: todayKolkata(), remark: pendingRemark }]
+      : remarks;
+
     setIsSubmitting(true);
     try {
       const payload: Record<string, unknown> = {
@@ -98,7 +114,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
         description: description.trim(),
         contactDetails: contactDetails.trim(),
         status,
-        projectRemarks: remarks
+        projectRemarks: allRemarks
       };
       const existingId = project?.id || project?._id;
       if (existingId) payload.id = existingId;
@@ -231,12 +247,17 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
               6. Project Remarks (Date-wise Timeline)
+              {remarks.length > 0 && (
+                <span className="ml-2 normal-case tracking-normal font-semibold text-blue-700">
+                  {remarks.length} added
+                </span>
+              )}
             </label>
             
             {remarks.length > 0 && (
               <div className="relative border-l-2 border-blue-500/40 ml-2 pl-4 space-y-3 mb-4">
                 {remarks.map((r, idx) => (
-                  <div key={idx} className="relative bg-slate-50/80 p-3 rounded-xl border border-slate-200 text-xs">
+                  <div key={r._id || `remark-${idx}-${r.date}-${r.remark}`} className="relative bg-slate-50/80 p-3 rounded-xl border border-slate-200 text-xs">
                     <span className="absolute -left-[21px] top-3.5 w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-white"></span>
                     <div className="flex items-center justify-between">
                       <span className="font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider">
@@ -262,18 +283,28 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
                 type="text"
                 value={newRemarkText}
                 onChange={(e) => setNewRemarkText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddRemark();
+                  }
+                }}
                 placeholder="Add new date-wise remark..."
                 className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
                 type="button"
                 onClick={handleAddRemark}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg flex items-center gap-1 shadow-xs"
+                disabled={!newRemarkText.trim()}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg flex items-center gap-1 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus size={14} />
                 Add Remark
               </button>
             </div>
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              Add multiple remarks (1, 2, 3… as many as needed), then Save Project. Each remark becomes a selectable task.
+            </p>
           </div>
 
           {/* Action Buttons */}

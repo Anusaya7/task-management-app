@@ -158,6 +158,47 @@ export async function POST(req: Request) {
 
     const taskPriority = user.role === 'Employee' ? 'Self' : (priority || 'Medium')
 
+    if (user.role !== 'Employee') {
+      const sameProjectTasks = await Task.find({ projectId: project._id.toString() })
+      const existing = sameProjectTasks.find(item =>
+        item.priority !== 'Self' &&
+        (item.title || '').trim().toLowerCase() === trimmedTitle.toLowerCase()
+      )
+      if (existing) {
+        const mergedIds = Array.from(new Set([...(existing.assignedEmployeeIds || []), ...validAssignees]))
+        const mergedAssignees = await Employee.find({ _id: { $in: mergedIds } })
+        const mergedNames = mergedAssignees.map(e => `${e.firstName} ${e.lastName}`)
+        const previousIds = new Set(existing.assignedEmployeeIds || [])
+        const newlyAssigned = validAssignees.filter(id => !previousIds.has(id))
+
+        existing.assignedEmployeeIds = mergedIds
+        existing.assignedEmployeeNames = mergedNames
+        existing.assigneeProgress = ensureAssigneeProgress(mergedIds, mergedNames, existing.assigneeProgress || [])
+        if (reminderDate) existing.reminderDate = reminderDate
+        if (priority && existing.priority !== 'Self') existing.priority = taskPriority
+        existing.updatedAt = new Date()
+        await existing.save()
+
+        const assignerName = `${user.firstName} ${user.lastName}`
+        for (const empId of newlyAssigned) {
+          if (empId !== user._id.toString()) {
+            await sendNotifications({
+              recipientUserId: empId,
+              type: 'TASK_ASSIGNED',
+              title: `New ${taskPriority} Task Assigned`,
+              message: `${assignerName} assigned '${existing.title}' in ${project.projectName}`,
+              taskId: existing._id.toString(),
+              projectId: project._id.toString(),
+              relatedUserId: user._id.toString(),
+              relatedUserName: assignerName
+            })
+          }
+        }
+
+        return NextResponse.json(serializeTaskWithAssignees(existing), { status: 200 })
+      }
+    }
+
     const newTask = await Task.create({
       title: trimmedTitle,
       description: description && String(description).trim() ? String(description).trim() : trimmedTitle,
