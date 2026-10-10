@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose'
 
 export interface IProject extends Document {
   projectName: string
+  projectCode?: string
   projectNumber: string
   location?: string
   description: string
@@ -18,6 +19,7 @@ export interface IProject extends Document {
 
 const projectSchema = new Schema<IProject>({
   projectName: { type: String, required: true },
+  projectCode: { type: String, index: true },
   projectNumber: { type: String, required: true },
   location: { type: String, required: false },
   description: { type: String, required: true },

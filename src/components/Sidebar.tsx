@@ -2,20 +2,15 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard,
-  CheckSquare,
   FolderOpen,
   Users,
   LogOut,
   User,
-  Flag,
-  Bell,
   BarChart3,
   CheckCircle2,
   CalendarCheck,
   Menu,
-  X,
-  Briefcase,
-  ListTodo
+  X
 } from 'lucide-react';
 
 export type TabType =
@@ -38,65 +33,113 @@ interface SidebarProps {
   onTabChange: (tab: TabType) => void;
   flagCount?: number;
   reminderCount?: number;
+  cartCount?: number;
 }
+
+type NavItem = { id: TabType; label: string; icon: any };
 
 const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   onTabChange,
-  flagCount = 0,
-  reminderCount = 0
+  cartCount = 0
 }) => {
-  const { logout, user, isDirector, isProjectHead, isEmployee } = useAuth();
+  const { logout, user, isDirector, isProjectHead } = useAuth();
+  const isManagementDashboard = isDirector || isProjectHead;
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  // Grouped Navigation Sections for Director
-  const directorGroups: { section: string; items: { id: TabType; label: string; icon: any; badge?: number }[] }[] = [
-    {
-      section: 'PROJECT MONITORING',
-      items: [
-        { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
-        { id: 'my-tasks', label: 'My Tasks', icon: CheckSquare },
-        { id: 'reports', label: 'Daily Reports', icon: BarChart3 },
-        { id: 'completed', label: 'Completed History', icon: CheckCircle2 },
-        { id: 'reminders', label: 'Reminders', icon: Bell, badge: reminderCount },
-        { id: 'flags', label: 'Flags', icon: Flag, badge: flagCount },
-        { id: 'profile', label: 'Profile', icon: User }
-      ]
-    },
-    {
-      section: 'MANAGEMENT',
-      items: [
-        { id: 'projects', label: 'Projects', icon: FolderOpen },
-        { id: 'employees', label: 'Employees', icon: Users },
-        { id: 'tasks', label: 'All Tasks Overview', icon: ListTodo }
-      ]
-    }
+  // Director — requirement tabs (order fixed)
+  const directorTabs: NavItem[] = [
+    { id: 'overview', label: 'Dash Board', icon: LayoutDashboard },
+    { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
+    { id: 'projects', label: 'Project Board', icon: FolderOpen },
+    { id: 'employees', label: 'Employee Board', icon: Users },
+    { id: 'completed', label: 'Completed Task History', icon: CheckCircle2 },
+    { id: 'performance', label: 'Performance', icon: BarChart3 },
+    { id: 'profile', label: 'Profile', icon: User }
   ];
+
+  // Project Head — same as Director tabs excluding Project Board / Employee Board
+  const projectHeadTabs: NavItem[] = [
+    { id: 'overview', label: 'Dash Board', icon: LayoutDashboard },
+    { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
+    { id: 'completed', label: 'Completed Task History', icon: CheckCircle2 },
+    { id: 'performance', label: 'Performance', icon: BarChart3 },
+    { id: 'profile', label: 'Profile', icon: User }
+  ];
+
+  // Employee — view-focused tabs
+  const employeeTabs: NavItem[] = [
+    { id: 'overview', label: 'Dash Board', icon: LayoutDashboard },
+    { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
+    { id: 'completed', label: 'Completed Task History', icon: CheckCircle2 },
+    { id: 'performance', label: 'Performance', icon: BarChart3 },
+    { id: 'profile', label: 'Profile', icon: User }
+  ];
+
+  const navTabs: NavItem[] = isDirector
+    ? directorTabs
+    : isProjectHead
+      ? projectHeadTabs
+      : employeeTabs;
 
   const handleTabClick = (tabId: TabType) => {
     onTabChange(tabId);
     setIsMobileOpen(false);
   };
 
+  const renderNavButtons = () => (
+    <nav className="space-y-1">
+      {navTabs.map((tab) => {
+        const Icon = tab.icon;
+        const isActive = activeTab === tab.id;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => handleTabClick(tab.id)}
+            className={`w-full flex items-center justify-between rounded-xl font-semibold transition-all duration-150 ${isManagementDashboard ? 'px-3.5 py-3.5 text-sm' : 'px-3.5 py-2.5 text-xs'} ${isActive
+                ? 'bg-[#2563EB] text-white shadow-md shadow-blue-900/30'
+                : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+              }`}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+                {!isManagementDashboard && (
+                  <Icon size={17} className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                )}
+                <span className="truncate">{tab.label}</span>
+              </div>
+            {tab.id === 'today-work' && cartCount > 0 && (
+              <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-extrabold flex items-center justify-center ${
+                isActive ? 'bg-white text-[#2563EB]' : 'bg-[#2563EB] text-white'
+              }`}>
+                {cartCount}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
   const navContent = (
-    <div className="flex flex-col h-full bg-[#0F172A] text-slate-100 font-sans">
+    <div className="flex h-full flex-col bg-[#0D1729] font-sans text-slate-100">
       {/* Company Branding */}
-      <div className="p-4 border-b border-slate-800/80">
+      <div className={`p-4 ${isManagementDashboard ? 'pt-6' : 'border-b border-slate-800/80'}`}>
         <div className="flex items-center gap-3">
-          <img
-            src="/logo.png"
-            alt="Korals Design Logo"
-            className="h-10 w-auto object-contain bg-black px-2 py-1 rounded-xl border border-slate-700/80 shadow-md flex-shrink-0"
-          />
+          {!isManagementDashboard && (
+            <img
+              src="/logo.png"
+              alt="Korals Design Logo"
+              className="h-10 w-auto flex-shrink-0 rounded-xl border border-slate-700/80 bg-black px-2 py-1 object-contain shadow-md"
+            />
+          )}
           <div className="min-w-0">
-            <h1 className="text-xs font-black text-white tracking-wider uppercase leading-tight truncate">
+            <h1 className={`truncate font-black uppercase leading-tight text-white ${isManagementDashboard ? 'text-base tracking-wide' : 'text-xs tracking-wider'}`}>
               KORALS DESIGN
             </h1>
-            <h2 className="text-[11px] font-bold text-blue-400 mt-0.5 leading-tight tracking-tight">
+            <h2 className="mt-1 text-[11px] font-bold leading-tight tracking-tight text-blue-400">
               PROJECT MONITORING
             </h2>
-            <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-bold tracking-wider uppercase rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+            <span className="mt-1 inline-block rounded border border-blue-500/30 bg-blue-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-300">
               {user?.role ? `${user.role.toUpperCase()} DASHBOARD` : 'DASHBOARD'}
             </span>
           </div>
@@ -104,98 +147,26 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Navigation Menu */}
-      <div className="flex-1 py-4 px-3 overflow-y-auto space-y-5">
-        {isDirector ? (
-          directorGroups.map((group) => (
-            <div key={group.section} className="space-y-1">
-              <p className="px-3 text-[10px] font-extrabold text-[#94A3B8] uppercase tracking-wider mb-1.5">
-                {group.section}
-              </p>
-              {group.items.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => handleTabClick(tab.id)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${isActive
-                        ? 'bg-[#2563EB] text-white shadow-md shadow-blue-900/30'
-                        : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                      }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Icon size={17} className={isActive ? 'text-white' : 'text-slate-400'} />
-                      <span>{tab.label}</span>
-                    </div>
-                    {tab.badge && tab.badge > 0 ? (
-                      <span
-                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${isActive ? 'bg-white text-blue-700' : 'bg-rose-500 text-white shadow-sm'
-                          }`}
-                      >
-                        {tab.badge}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))
-        ) : (
-          <nav className="space-y-1">
-            {(isProjectHead
-              ? [
-                { id: 'overview' as TabType, label: 'Dashboard', icon: LayoutDashboard },
-                { id: 'projects' as TabType, label: 'My Projects', icon: FolderOpen },
-                { id: 'tasks' as TabType, label: 'Tasks', icon: CheckSquare },
-                { id: 'employees' as TabType, label: 'Employees', icon: Users },
-                { id: 'completed' as TabType, label: 'Completed Tasks', icon: CheckCircle2 },
-                { id: 'flags' as TabType, label: 'Flags', icon: Flag, badge: flagCount },
-                { id: 'profile' as TabType, label: 'Profile', icon: User }
-              ]
-              : [
-                  { id: 'overview' as TabType, label: 'Dashboard', icon: LayoutDashboard },
-                  { id: 'today-work' as TabType, label: 'Daily Task Board', icon: CalendarCheck },
-                  { id: 'completed' as TabType, label: 'Completed History', icon: CheckCircle2 },
-                  { id: 'reminders' as TabType, label: 'Reminder', icon: Bell, badge: reminderCount },
-                  { id: 'flags' as TabType, label: 'Flags', icon: Flag, badge: flagCount },
-                  { id: 'performance' as TabType, label: 'My Performance', icon: BarChart3 },
-                  { id: 'profile' as TabType, label: 'Profile', icon: User }
-                ]
-            ).map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => handleTabClick(tab.id)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${isActive
-                      ? 'bg-[#2563EB] text-white shadow-md'
-                      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                    }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Icon size={17} className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                    <span className="truncate">{tab.label}</span>
-                  </div>
-                  {tab.badge && tab.badge > 0 ? (
-                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${isActive ? 'bg-white text-blue-700' : 'bg-rose-500 text-white'}`}>
-                      {tab.badge}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </nav>
-        )}
+      <div className={`flex-1 overflow-y-auto px-3 ${isManagementDashboard ? 'py-4' : 'space-y-5 py-4'}`}>
+        <div className="space-y-1">
+          {!isManagementDashboard && (
+            <p className="mb-1.5 px-3 text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8]">
+              {isProjectHead ? 'PROJECT HEAD MENU' : 'EMPLOYEE MENU'}
+            </p>
+          )}
+          {renderNavButtons()}
+        </div>
       </div>
 
       {/* User Info & Sign Out */}
-      <div className="p-4 border-t border-slate-800/80">
-        <div className="flex items-center gap-3 p-2.5 bg-slate-800/50 rounded-xl mb-3 border border-slate-700/40">
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-sm">
-            {user?.name?.charAt(0) || user?.email?.charAt(0).toUpperCase() || 'D'}
-          </div>
-          <div className="flex-1 min-w-0">
+      <div className="border-t border-slate-800/80 p-4">
+        <div className={`mb-3 rounded-xl border border-slate-700/40 bg-slate-800/60 ${isManagementDashboard ? 'p-3' : 'flex items-center gap-3 p-2.5'}`}>
+          {!isManagementDashboard && (
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm">
+              {user?.name?.charAt(0) || user?.email?.charAt(0).toUpperCase() || 'D'}
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-white truncate">
               {user?.name || user?.email}
             </p>

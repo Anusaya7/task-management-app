@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Task, Project, Employee, TaskPriority } from '../types';
 import { AlertCircle, Check, ChevronDown, Search, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { formatHierarchyCode } from '@/lib/taskHierarchy';
 
 interface TaskModalProps {
   task?: Task | null;
@@ -19,8 +20,9 @@ interface TaskModalProps {
 const DIRECTOR_PRIORITIES: { value: TaskPriority; label: string }[] = [
   { value: 'Urgent', label: 'Urgent' },
   { value: 'Medium', label: 'Less Urgent' },
-  { value: 'Low', label: 'Low Urgent' },
-  { value: 'Daily', label: 'Daily Task' }
+  { value: 'Daily', label: 'Daily Task' },
+  { value: 'Self', label: 'Self-define' },
+  { value: 'Low', label: 'Low Urgent' }
 ];
 
 const TaskModal: React.FC<TaskModalProps> = ({
@@ -47,6 +49,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [fieldErrors, setFieldErrors] = useState<{ title?: string; projectId?: string; employees?: string; projectTasks?: string }>({});
   const [selectedRemarkKeys, setSelectedRemarkKeys] = useState<string[]>([]);
   const [taskRequirements, setTaskRequirements] = useState<Record<string, string>>({});
+  const [taskSubtasks, setTaskSubtasks] = useState<Record<string, Array<{ title: string; requirement: string }>>>({});
+  const [taskPriorities, setTaskPriorities] = useState<Record<string, TaskPriority>>({});
+  const [customTasks, setCustomTasks] = useState<Array<{ key: string; title: string }>>([]);
+  const customTaskCounter = useRef(0);
   const [parentTaskId, setParentTaskId] = useState('');
   const employeeMenuRef = useRef<HTMLDivElement | null>(null);
   const submitLockRef = useRef(false);
@@ -75,6 +81,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
     setFieldErrors({});
     setSelectedRemarkKeys([]);
     setTaskRequirements({});
+    setTaskSubtasks({});
+    setTaskPriorities({});
+    setCustomTasks([]);
     setEmployeeSearch('');
     setIsEmployeeMenuOpen(false);
     setIsSubmitting(false);
@@ -102,7 +111,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   }, [isEmployeeMenuOpen]);
 
   const assignableEmployees = useMemo(
-    () => employees.filter(emp => emp.role === 'Employee' && emp.status !== 'Inactive'),
+    () => employees.filter(emp => emp.status !== 'Inactive' && emp.role !== 'Director'),
     [employees]
   );
 
@@ -114,10 +123,16 @@ const TaskModal: React.FC<TaskModalProps> = ({
   );
 
   const projectTaskOptions = useMemo(() => {
-    if (!selectedProject) return [] as Array<{ key: string; title: string; date?: string }>;
+    type Option = { key: string; title: string; date?: string; code?: string; priority?: TaskPriority };
+    if (!selectedProject) return [] as Option[];
     const remarks = selectedProject.projectRemarks || [];
-    const options: Array<{ key: string; title: string; date?: string }> = [];
+    const options: Option[] = [];
     const remarkTitles = new Set<string>();
+    const mainTasks = existingTasks.filter(item =>
+      String(item.projectId) === String(projectId) && item.priority !== 'Self' && !item.parentTaskId
+    );
+    const taskForTitle = (title: string) =>
+      mainTasks.find(item => (item.title || '').trim().toLowerCase() === title.toLowerCase());
 
     remarks.forEach((remark, index) => {
       const title = (remark.remark || '').trim();
@@ -126,22 +141,23 @@ const TaskModal: React.FC<TaskModalProps> = ({
       const key = remarkId && remarkId !== '[object Object]'
         ? `remark-${remarkId}`
         : `remark-${index}-${remark.date || ''}-${title}`;
-      options.push({ key, title, date: remark.date });
+      const matched = taskForTitle(title);
+      options.push({ key, title, date: remark.date, code: matched?.taskCode, priority: matched?.priority });
       remarkTitles.add(title.toLowerCase());
     });
 
-    existingTasks
-      .filter(item => String(item.projectId) === String(projectId) && item.priority !== 'Self')
-      .forEach(item => {
-        const title = (item.title || '').trim();
-        if (!title) return;
-        if (remarkTitles.has(title.toLowerCase())) return;
-        options.push({
-          key: `task-${item.id || item._id || title}`,
-          title,
-          date: item.createdAt ? String(item.createdAt).substring(0, 10) : undefined
-        });
+    mainTasks.forEach(item => {
+      const title = (item.title || '').trim();
+      if (!title) return;
+      if (remarkTitles.has(title.toLowerCase())) return;
+      options.push({
+        key: `task-${item.id || item._id || title}`,
+        title,
+        date: item.createdAt ? String(item.createdAt).substring(0, 10) : undefined,
+        code: item.taskCode,
+        priority: item.priority
       });
+    });
 
     return options;
   }, [selectedProject, existingTasks, projectId]);
@@ -158,10 +174,20 @@ const TaskModal: React.FC<TaskModalProps> = ({
   }, [existingTasks, projectId, task]);
 
   const showProjectTaskList = !isEmployee && !task;
+  const isDirectorPriority = (value?: TaskPriority) =>
+    DIRECTOR_PRIORITIES.some(option => option.value === value);
+  const priorityForTask = (key: string): TaskPriority => {
+    if (taskPriorities[key]) return taskPriorities[key];
+    const existing = projectTaskOptions.find(option => option.key === key)?.priority;
+    return existing && isDirectorPriority(existing) ? existing : 'Urgent';
+  };
   const hideTitleField = showProjectTaskList;
 
   const getEmpId = (emp: Employee) => emp.id || emp._id || '';
-  const getEmpName = (emp: Employee) => `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+  const getEmpName = (emp: Employee) => {
+    const name = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+    return emp.role === 'Project Head' ? `${name} (Project Co-ordinator)` : name;
+  };
 
   const selectedEmployees = assignableEmployees.filter(emp => selectedEmployeeIds.includes(getEmpId(emp)));
   const searchTerm = employeeSearch.trim().toLowerCase();
@@ -197,9 +223,22 @@ const TaskModal: React.FC<TaskModalProps> = ({
     if (submitLockRef.current || isSubmitting) return;
 
     const trimmedTitle = hideTitleField ? '' : title.trim();
-    const selectedItems = projectTaskOptions
-      .filter(item => selectedRemarkKeys.includes(item.key))
-      .map(item => ({ ...item, requirement: (taskRequirements[item.key] || '').trim() }));
+    const selectedItems = [
+      ...projectTaskOptions.filter(item => selectedRemarkKeys.includes(item.key)),
+      ...customTasks
+        .map(item => ({ key: item.key, title: item.title.trim() }))
+        .filter(item => item.title)
+    ]
+      .map(item => ({
+        ...item,
+        priority: priorityForTask(item.key),
+        requirement: (taskRequirements[item.key] || '').trim(),
+        subtasks: parentTaskId
+          ? []
+          : (taskSubtasks[item.key] || [])
+              .map(sub => ({ title: sub.title.trim(), requirement: sub.requirement.trim() }))
+              .filter(sub => sub.title)
+      }));
     const nextErrors: { title?: string; projectId?: string; employees?: string; projectTasks?: string } = {};
 
     if (!projectId) nextErrors.projectId = 'Please select a Project.';
@@ -208,7 +247,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
       if (!trimmedTitle) nextErrors.title = 'Task Title is required.';
     } else if (selectedItems.length === 0 && !trimmedTitle) {
       if (hideTitleField) {
-        nextErrors.projectTasks = 'Please select at least one project task.';
+        nextErrors.projectTasks = 'Please select a task or add a new task.';
       } else {
         nextErrors.title = 'Task Title is required.';
       }
@@ -249,6 +288,107 @@ const TaskModal: React.FC<TaskModalProps> = ({
       hasError ? 'border-rose-400 focus:ring-rose-500' : 'border-slate-300 focus:ring-[#2563EB]'
     }`;
 
+  const renderTaskExtras = (key: string, title: string) => (
+    <div className="px-2 pb-2 pl-8">
+      <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+        Priority for {title} *
+      </label>
+      <div className="mb-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        {DIRECTOR_PRIORITIES.map(option => {
+          const selected = priorityForTask(key) === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setTaskPriorities(prev => ({ ...prev, [key]: option.value }))}
+              aria-pressed={selected}
+              className={`rounded-md border px-2 py-1.5 text-[11px] font-bold transition ${
+                selected
+                  ? 'border-[#2563EB] bg-[#2563EB] text-white shadow-sm'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+      <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+        Requirement for {title}
+      </label>
+      <textarea
+        value={taskRequirements[key] || ''}
+        onChange={(e) => {
+          const value = e.target.value;
+          setTaskRequirements(prev => ({ ...prev, [key]: value }));
+        }}
+        rows={2}
+        placeholder={`What exactly needs to be done in ${title}?`}
+        className="w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+      />
+      {!parentTaskId && (
+        <div className="mt-2 space-y-2 border-l-2 border-indigo-200 pl-3">
+          {(taskSubtasks[key] || []).map((sub, subIndex) => (
+            <div key={subIndex} className="rounded-lg border border-indigo-100 bg-white p-2">
+              <div className="flex items-center gap-2">
+                <span className="flex-shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-extrabold text-indigo-600">
+                  ST-{subIndex + 1}
+                </span>
+                <input
+                  type="text"
+                  value={sub.title}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setTaskSubtasks(prev => ({
+                      ...prev,
+                      [key]: (prev[key] || []).map((s, i) => i === subIndex ? { ...s, title: value } : s)
+                    }));
+                  }}
+                  placeholder={`Subtask name under ${title}`}
+                  className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setTaskSubtasks(prev => ({
+                    ...prev,
+                    [key]: (prev[key] || []).filter((_, i) => i !== subIndex)
+                  }))}
+                  className="flex-shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                  aria-label="Remove subtask"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <input
+                type="text"
+                value={sub.requirement}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setTaskSubtasks(prev => ({
+                    ...prev,
+                    [key]: (prev[key] || []).map((s, i) => i === subIndex ? { ...s, requirement: value } : s)
+                  }));
+                }}
+                placeholder="Requirement for this subtask (optional)"
+                className="mt-1.5 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setTaskSubtasks(prev => ({
+              ...prev,
+              [key]: [...(prev[key] || []), { title: '', requirement: '' }]
+            }))}
+            className="inline-flex items-center gap-1 rounded-md border border-dashed border-indigo-300 px-2.5 py-1 text-[11px] font-bold text-indigo-700 transition hover:bg-indigo-50"
+          >
+            + Add Subtask
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-3 sm:p-4">
       <div className="my-auto flex w-full max-w-2xl max-h-[calc(100vh-1.5rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[min(90vh,calc(100vh-2rem))]">
@@ -269,12 +409,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
-            {error && (
+          {error && (
               <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
                 <AlertCircle size={16} className="shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
+              <span>{error}</span>
+            </div>
+          )}
 
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
@@ -289,6 +429,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     setProjectId(e.target.value);
                     setSelectedRemarkKeys([]);
                     setTaskRequirements({});
+                    setTaskSubtasks({});
+                    setTaskPriorities({});
+                    setCustomTasks([]);
                     setParentTaskId('');
                     if (fieldErrors.projectId) setFieldErrors(prev => ({ ...prev, projectId: undefined, projectTasks: undefined }));
                   }}
@@ -299,7 +442,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     const id = projectKey(p);
                     return (
                       <option key={id} value={id}>
-                        {p.projectName} ({p.projectNumber})
+                        {p.projectCode ? `${formatHierarchyCode(p.projectCode)} — ` : ''}{p.projectName} ({p.projectNumber})
                       </option>
                     );
                   })}
@@ -312,10 +455,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
 
             {showProjectTaskList && projectId && (
-              <div>
+          <div>
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Tasks for {selectedProject?.projectName || 'Selected Project'}
+                    Tasks for {selectedProject?.projectCode || selectedProject?.projectName || 'Selected Project'}
                     {projectTaskOptions.length > 0 && (
                       <span className="ml-1 normal-case tracking-normal text-slate-500">
                         ({projectTaskOptions.length})
@@ -337,12 +480,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     </button>
                   )}
                 </div>
-                {projectTaskOptions.length === 0 ? (
-                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-medium text-slate-500">
-                    No saved tasks for this project yet. Add tasks to this project from the Projects page first.
-                  </p>
-                ) : (
-                  <div className={`max-h-96 space-y-1 overflow-y-auto rounded-lg border bg-white p-2 ${fieldErrors.projectTasks ? 'border-rose-400' : 'border-slate-300'}`}>
+                  <div className={`max-h-[28rem] space-y-1 overflow-y-auto rounded-lg border bg-white p-2 ${fieldErrors.projectTasks ? 'border-rose-400' : 'border-slate-300'}`}>
+                    {projectTaskOptions.length === 0 && customTasks.length === 0 && (
+                      <p className="px-2 py-1.5 text-xs font-medium text-slate-500">
+                        No tasks in this project yet. Click &ldquo;+ Add New Task&rdquo; below to create one.
+                      </p>
+                    )}
                     {projectTaskOptions.map(item => {
                       const checked = selectedRemarkKeys.includes(item.key);
                       return (
@@ -365,44 +508,84 @@ const TaskModal: React.FC<TaskModalProps> = ({
                             className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block font-semibold">{item.title}</span>
+                            <span className="flex flex-wrap items-center gap-1.5 font-semibold">
+                              {item.code && (
+                                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700">{item.code}</span>
+                              )}
+                              {item.title}
+                            </span>
                             {item.date && (
                               <span className="block text-[11px] font-medium text-slate-500">{item.date}</span>
                             )}
                           </span>
-                        </label>
-                        {checked && (
-                          <div className="px-2 pb-2 pl-8">
-                            <label className="mb-1 block text-[11px] font-semibold text-slate-600">
-                              Requirement for {item.title}
-                            </label>
-                            <textarea
-                              value={taskRequirements[item.key] || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setTaskRequirements(prev => ({ ...prev, [item.key]: value }));
-                              }}
-                              rows={2}
-                              placeholder={`What exactly needs to be done in ${item.title}?`}
-                              className="w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                            />
-                          </div>
-                        )}
+            </label>
+                        {checked && renderTaskExtras(item.key, item.title)}
                         </div>
                       );
                     })}
+                    {customTasks.map(custom => (
+                      <div key={custom.key} className="rounded-md bg-emerald-50/70 ring-1 ring-emerald-200">
+                        <div className="flex items-center gap-2 px-2 py-1.5">
+                          <span className="flex-shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-extrabold text-emerald-700">NEW TASK</span>
+            <input
+              type="text"
+                            value={custom.title}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setCustomTasks(prev => prev.map(t => t.key === custom.key ? { ...t, title: value } : t));
+                              if (fieldErrors.projectTasks) setFieldErrors(prev => ({ ...prev, projectTasks: undefined }));
+                            }}
+                            placeholder="Task name (e.g. Working Drawings)"
+                            className="min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomTasks(prev => prev.filter(t => t.key !== custom.key));
+                              setTaskRequirements(prev => {
+                                const { [custom.key]: _removed, ...rest } = prev;
+                                return rest;
+                              });
+                              setTaskSubtasks(prev => {
+                                const { [custom.key]: _removed, ...rest } = prev;
+                                return rest;
+                              });
+                              setTaskPriorities(prev => {
+                                const { [custom.key]: _removed, ...rest } = prev;
+                                return rest;
+                              });
+                            }}
+                            className="flex-shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                            aria-label="Remove new task"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        {renderTaskExtras(custom.key, custom.title.trim() || 'this task')}
+                      </div>
+                    ))}
                   </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    customTaskCounter.current += 1;
+                    setCustomTasks(prev => [...prev, { key: `new-${customTaskCounter.current}`, title: '' }]);
+                    if (fieldErrors.projectTasks) setFieldErrors(prev => ({ ...prev, projectTasks: undefined }));
+                  }}
+                  className="mt-2 inline-flex items-center gap-1 rounded-lg border border-dashed border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
+                >
+                  + Add New Task
+                </button>
                 {fieldErrors.projectTasks && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.projectTasks}</p>}
-              </div>
+          </div>
             )}
 
             {!isEmployee && projectId && (
-              <div>
+          <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                   Parent Task (optional)
-                </label>
-                <select
+            </label>
+            <select
                   value={parentTaskId}
                   onChange={(e) => setParentTaskId(e.target.value)}
                   className={inputClass()}
@@ -412,22 +595,22 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     const id = String(item.id || item._id || '');
                     return (
                       <option key={id} value={id}>
-                        {item.title}
-                      </option>
+                        {item.taskCode || item.title}
+                </option>
                     );
                   })}
-                </select>
+            </select>
                 <p className="mt-1 text-[11px] font-medium text-slate-500">
                   Optional: pick an existing main task to add the selected tasks under it.
-                </p>
+              </p>
               </div>
             )}
 
             {!hideTitleField && (
-            <div>
+          <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                 {showProjectTaskList ? 'Task Title' : 'Task Title *'}
-              </label>
+            </label>
               <input
                 type="text"
                 value={title}
@@ -442,6 +625,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
             )}
 
+            {!showProjectTaskList && (
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                 Priority *
@@ -457,7 +641,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {DIRECTOR_PRIORITIES.map(option => {
                     const selected = priority === option.value;
-                    return (
+                  return (
                       <button
                         key={option.value}
                         type="button"
@@ -475,12 +659,13 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 </div>
               )}
             </div>
+            )}
 
             {!isEmployee && (
               <div ref={employeeMenuRef}>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                   Assign Employees *
-                </label>
+                    </label>
                 {selectedEmployees.length > 0 && (
                   <div className="mb-2">
                     <p className="mb-1.5 text-[11px] font-semibold text-slate-500">Selected Employees:</p>
@@ -499,11 +684,11 @@ const TaskModal: React.FC<TaskModalProps> = ({
                               <X size={12} />
                             </button>
                           </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
                 {dataLoading && assignableEmployees.length === 0 ? (
                   <p className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500">Loading employees...</p>
@@ -562,29 +747,31 @@ const TaskModal: React.FC<TaskModalProps> = ({
               </div>
             )}
 
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                {showProjectTaskList ? 'Common Description (optional)' : 'Task Description'}
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={4}
-                placeholder={showProjectTaskList ? 'Used for selected tasks that have no requirement written above' : 'Enter task details...'}
-                className={`${inputClass()} min-h-[96px] resize-y`}
-              />
-            </div>
+            {!showProjectTaskList && (
+          <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Task Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+                  rows={4}
+                  placeholder="Enter task details..."
+                  className={`${inputClass()} min-h-[96px] resize-y`}
+            />
+          </div>
+            )}
 
-            <div>
+          <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
                 Due Date / Reminder Date (Optional)
-              </label>
-              <input
-                type="date"
-                value={reminderDate}
-                onChange={(e) => setReminderDate(e.target.value)}
+            </label>
+            <input
+              type="date"
+              value={reminderDate}
+              onChange={(e) => setReminderDate(e.target.value)}
                 className={inputClass()}
-              />
+            />
             </div>
           </div>
 

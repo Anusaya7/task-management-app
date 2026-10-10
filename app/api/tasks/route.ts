@@ -8,6 +8,7 @@ import PrivateRating from '@/models/PrivateRating'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 import { sendNotifications } from '@/lib/notifications'
 import { ensureAssigneeProgress, serializeTaskWithAssignees } from '@/lib/assigneeProgress'
+import { ensureTaskCodes } from '@/lib/hierarchyCodes'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,6 +61,7 @@ export async function GET(req: Request) {
     if (status) query.status = status
     if (projectId) query.projectId = projectId
 
+    await ensureTaskCodes()
     let tasks = await Task.find(query).sort({ updatedAt: -1 }).lean()
     tasks = tasks.map(serializeTaskWithAssignees)
 
@@ -188,10 +190,18 @@ export async function POST(req: Request) {
 
     if (user.role !== 'Employee') {
       const sameProjectTasks = await Task.find({ projectId: project._id.toString() })
-      const existing = sameProjectTasks.find(item =>
+      // Same title only merges within the same parent, so P1/T1 and P1/T2 can both have a "Plans" subtask.
+      const sameTitle = sameProjectTasks.filter(item =>
         item.priority !== 'Self' &&
         (item.title || '').trim().toLowerCase() === trimmedTitle.toLowerCase()
       )
+      const parentOf = (item: any) => {
+        const parentId = String(item.parentTaskId || '')
+        return parentId === item._id.toString() ? '' : parentId
+      }
+      const existing =
+        sameTitle.find(item => parentOf(item) === resolvedParentId) ||
+        (resolvedParentId ? sameTitle.find(item => !parentOf(item)) : undefined)
       if (existing) {
         const mergedIds = Array.from(new Set([...(existing.assignedEmployeeIds || []), ...validAssignees]))
         const mergedAssignees = await Employee.find({ _id: { $in: mergedIds } })
@@ -213,11 +223,12 @@ export async function POST(req: Request) {
           existing.parentTaskId = undefined
           existing.parentTaskTitle = undefined
         }
-        if (resolvedParentId && resolvedParentId !== existing._id.toString()) {
+        if (resolvedParentId && resolvedParentId !== existing._id.toString() && parentOf(existing) !== resolvedParentId) {
           const existingHasSubtasks = await Task.exists({ parentTaskId: existing._id.toString(), _id: { $ne: existing._id } })
           if (!existingHasSubtasks) {
             existing.parentTaskId = resolvedParentId
             existing.parentTaskTitle = resolvedParentTitle
+            existing.taskCode = undefined
           }
         }
         if (priority && existing.priority !== 'Self') existing.priority = taskPriority
@@ -240,7 +251,9 @@ export async function POST(req: Request) {
           }
         }
 
-        return NextResponse.json(serializeTaskWithAssignees(existing), { status: 200 })
+        await ensureTaskCodes([project._id.toString()])
+        const mergedTask = (await Task.findById(existing._id)) || existing
+        return NextResponse.json(serializeTaskWithAssignees(mergedTask), { status: 200 })
       }
     }
 
@@ -299,7 +312,9 @@ export async function POST(req: Request) {
       })
     }
 
-    return NextResponse.json(serializeTaskWithAssignees(newTask), { status: 201 })
+    await ensureTaskCodes([project._id.toString()])
+    const createdTask = (await Task.findById(newTask._id)) || newTask
+    return NextResponse.json(serializeTaskWithAssignees(createdTask), { status: 201 })
   } catch (error: any) {
     console.error('Tasks POST API error:', error)
     return NextResponse.json({ error: 'Failed to create task' }, { status: 500 })

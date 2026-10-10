@@ -68,6 +68,45 @@ export function groupItemsByProject<T extends {
   }))
 }
 
+/** Display form of stored codes as created: P1, P1-T1, P1/T1/ST1 (no P-1 dash rewrite). */
+export function formatHierarchyCode(code?: string) {
+  return String(code || '')
+    .trim()
+    .replace(/(ST|P|T)(\d+)/gi, (_, prefix: string, num: string) => `${prefix.toUpperCase()}${num}`)
+}
+
+/** True when a title only repeats the code (e.g. "-P1/T1/ST1" for P1/T1/ST1). */
+export function titleRepeatsCode(title?: string, code?: string) {
+  const clean = (value?: string) => String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  const cleanTitle = clean(title)
+  return Boolean(cleanTitle) && (cleanTitle === clean(code) || cleanTitle === clean(formatHierarchyCode(code)))
+}
+
+const codeParts = (code: string) => (code.match(/\d+/g) || []).map(Number)
+
+const compareCodeParts = (a: number[], b: number[]) => {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i] - b[i]
+  }
+  return a.length - b.length
+}
+
+/** Orders items by hierarchy code (P1-T1, P1/T1/ST1, P1-T2, P2-T1 ...); uncoded items keep their order at the end. */
+export function sortByHierarchyCode<T>(items: T[], getCode: (item: T) => string | undefined): T[] {
+  return items
+    .map((item, index) => {
+      const code = String(getCode(item) || '')
+      return { item, index, code, parts: codeParts(code) }
+    })
+    .sort((a, b) => {
+      if (a.code && b.code) return compareCodeParts(a.parts, b.parts) || a.index - b.index
+      if (a.code) return -1
+      if (b.code) return 1
+      return a.index - b.index
+    })
+    .map(entry => entry.item)
+}
+
 export function orderMainTasksFirst<T>(
   items: T[],
   getId: (item: T) => string,

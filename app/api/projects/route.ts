@@ -4,7 +4,8 @@ import Project from '@/models/Project'
 import Task from '@/models/Task'
 import Employee from '@/models/Employee'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
-import { persistProjectStatus, serializeProject } from '@/lib/projectStatus'
+import { isOngoingProjectStatus, persistProjectStatus, serializeProject } from '@/lib/projectStatus'
+import { ensureProjectCodes } from '@/lib/hierarchyCodes'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +17,7 @@ export async function GET(req: Request) {
     }
 
     await connectToDatabase()
+    await ensureProjectCodes()
 
     if (user.role === 'Director') {
       const projects = await Project.find().sort({ updatedAt: -1 })
@@ -35,7 +37,11 @@ export async function GET(req: Request) {
     const projectIds = Array.from(new Set([...taskProjectIds, ...directProjectIds].filter(Boolean)))
     const projects = await Project.find({ _id: { $in: projectIds } }).sort({ updatedAt: -1 })
 
-    return NextResponse.json(projects.map(serializeProject))
+    return NextResponse.json(
+      projects
+        .filter(project => isOngoingProjectStatus(project.status))
+        .map(serializeProject)
+    )
   } catch (error: any) {
     console.error('Projects GET API error:', error)
     return NextResponse.json({ error: 'Failed to fetch projects' }, { status: 500 })
@@ -92,7 +98,9 @@ export async function POST(req: Request) {
       })
     }
 
-    return NextResponse.json(serializeProject(newProject), { status: 201 })
+    await ensureProjectCodes()
+    const savedProject = (await Project.findById(newProject._id)) || newProject
+    return NextResponse.json(serializeProject(savedProject), { status: 201 })
   } catch (error: any) {
     console.error('Projects POST API error:', error)
     return NextResponse.json({ error: 'Failed to create project' }, { status: 500 })

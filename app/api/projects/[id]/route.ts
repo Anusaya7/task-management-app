@@ -9,6 +9,7 @@ import Reminder from '@/models/Reminder'
 import TaskHistory from '@/models/TaskHistory'
 import TaskAssignmentHistory from '@/models/TaskAssignmentHistory'
 import PrivateRating from '@/models/PrivateRating'
+import Employee from '@/models/Employee'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
 import { persistProjectStatus, serializeProject } from '@/lib/projectStatus'
 
@@ -122,6 +123,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     const taskIds = projectTasks.map(task => task._id.toString())
 
     await Promise.all([
+      Employee.updateMany({ assignedProjects: projectId }, { $pull: { assignedProjects: projectId } }),
       Task.deleteMany({ projectId }),
       DailyEntry.deleteMany({ projectId }),
       Flag.deleteMany({ $or: [{ projectId }, { taskId: { $in: taskIds } }] }),

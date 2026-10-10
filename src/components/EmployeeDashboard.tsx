@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Project, Task, Reminder, Flag, TaskPriority, EmployeePerformance, DailyEntry } from '../types';
+import { Project, Task, Reminder, Flag, TaskPriority, EmployeePerformance, DailyEntry, DailyEntryAttachment } from '../types';
 import Sidebar, { TabType } from './Sidebar';
-import { formatHoursMinutes } from './BadgeUtils';
+import { CodeBadge, formatHoursMinutes } from './BadgeUtils';
 import { hoursToHHMM, parseTimeInput, MAX_DAILY_HOURS } from '@/lib/timeFormat';
 import TaskModal from './TaskModal';
 import NotificationCenter from './NotificationCenter';
@@ -36,11 +36,12 @@ import {
   Filter,
   Info,
   Edit3,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
-import { groupItemsByProject, orderMainTasksFirst } from '@/lib/taskHierarchy';
+import { formatHierarchyCode, groupItemsByProject, orderMainTasksFirst, sortByHierarchyCode, titleRepeatsCode } from '@/lib/taskHierarchy';
 
-type CategoryType = 'URGENT' | 'LESS_URGENT' | 'LOW_URGENT' | 'SELF_DEFINED' | 'DAILY_TASK';
+type CategoryType = 'URGENT' | 'LESS_URGENT' | 'LOW_URGENT' | 'All' | 'SELF_DEFINED' | 'DAILY_TASK';
 
 interface CategoryConfig {
   id: CategoryType;
@@ -66,9 +67,9 @@ const CATEGORIES: CategoryConfig[] = [
     id: 'LESS_URGENT',
     label: 'Less Urgent',
     dbPriority: 'Medium',
-    bgColor: '#F59E0B',
-    hoverColor: '#D97706',
-    activeRing: 'ring-[#F59E0B]',
+    bgColor: '#64748B',
+    hoverColor: '#475569',
+    activeRing: 'ring-[#64748B]',
     textColor: '#FFFFFF'
   },
   {
@@ -100,16 +101,6 @@ const CATEGORIES: CategoryConfig[] = [
   }
 ];
 
-interface DisplayTaskItem {
-  id: string;
-  projectId: string;
-  projectName: string;
-  title: string;
-  description: string;
-  category: CategoryType;
-  parentTaskId?: string;
-}
-
 interface BoardTask {
   boardId: string;
   taskId: string;
@@ -123,6 +114,7 @@ interface BoardTask {
   hoursInput?: string;
   flagged?: boolean | null;
   flagComment: string;
+  attachments?: DailyEntryAttachment[];
   concernedPersonId: string;
   concernedPersonName: string;
   workDone: number; // 10-100%
@@ -146,7 +138,34 @@ interface BoardBlock {
   history: DailyEntry[];
 }
 
-const BOARD_HISTORY_ROWS = 3;
+const BOARD_HISTORY_DAYS = 5;
+const MAX_DAILY_COMMENT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const DAILY_COMMENT_ATTACHMENT_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
+
+const readDailyCommentAttachment = (file: File, index: number): Promise<DailyEntryAttachment> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error(`Unable to read "${file.name}".`));
+        return;
+      }
+      const separator = reader.result.indexOf(',');
+      if (separator < 0) {
+        reject(new Error(`Unable to read "${file.name}".`));
+        return;
+      }
+      resolve({
+        id: `${Date.now()}-${file.lastModified}-${index}`,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        data: reader.result.slice(separator + 1)
+      });
+    };
+    reader.onerror = () => reject(reader.error || new Error(`Unable to read "${file.name}".`));
+    reader.readAsDataURL(file);
+  });
 
 const formatBoardDate = (dateStr: string) => {
   const d = new Date(`${String(dateStr).substring(0, 10)}T00:00:00`);
@@ -191,12 +210,12 @@ const EmployeeDashboard: React.FC = () => {
   const [dailyWorkActionTaken, setDailyWorkActionTaken] = useState<string>('');
   const [dailyWorkHours, setDailyWorkHours] = useState<string>('01:00');
   const [dailyWorkError, setDailyWorkError] = useState<string>('');
+  const [isSubmittedWorkOpen, setIsSubmittedWorkOpen] = useState(false);
+  const [submittedWorkProjectFilter, setSubmittedWorkProjectFilter] = useState('ALL');
+  const [submittedWorkTaskFilter, setSubmittedWorkTaskFilter] = useState('ALL');
 
   // Daily Entry Task Board State
   const [dailyBoard, setDailyBoard] = useState<BoardTask[]>([]);
-  const dismissedBoardTaskIds = useRef<Set<string>>(new Set());
-  const submittedTodayTaskIds = useRef<Set<string>>(new Set());
-  
   // Validation Errors state per board item ID
   const [fieldErrors, setFieldErrors] = useState<Record<string, { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string; status?: string }>>({});
   const [boardGlobalError, setBoardGlobalError] = useState<string | null>(null);
@@ -214,6 +233,9 @@ const EmployeeDashboard: React.FC = () => {
 
   // Completed History Sub-Tab
   const [completedHistorySubTab, setCompletedHistorySubTab] = useState<'daily' | 'tasks'>('daily');
+  const [completedHistoryProjectFilter, setCompletedHistoryProjectFilter] = useState('ALL');
+  const [completedHistoryEmployeeFilter, setCompletedHistoryEmployeeFilter] = useState('ALL');
+  const [completedHistoryTimeFilter, setCompletedHistoryTimeFilter] = useState<'all' | 'date' | 'week' | 'month'>('all');
 
   // Reminder & Flag Reply states
   const [reminderReplies, setReminderReplies] = useState<Record<string, string>>({});
@@ -238,156 +260,21 @@ const EmployeeDashboard: React.FC = () => {
 
   const todayDateStr = getKolkataDateString();
 
-  // Performance Tab View State ('daily' | 'weekly' | 'monthly' | 'custom')
-  const [perfTab, setPerfTab] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
-  const [perfStartDate, setPerfStartDate] = useState<string>(todayDateStr);
-  const [perfEndDate, setPerfEndDate] = useState<string>(todayDateStr);
-  const perfStartDateRef = useRef(perfStartDate);
-  const perfEndDateRef = useRef(perfEndDate);
+  // Performance data refresh ordering
   const perfRequestIdRef = useRef(0);
 
-  useEffect(() => {
-    perfStartDateRef.current = perfStartDate;
-    perfEndDateRef.current = perfEndDate;
-  }, [perfStartDate, perfEndDate]);
-
-  const normalizeDateRange = (start: string, end: string) => (
-    start <= end ? { start, end } : { start: end, end: start }
-  );
-
-  const getWeekBounds = (dateStr: string) => {
-    const [yr, mo, dy] = dateStr.split('-').map(Number);
-    const d = new Date(Date.UTC(yr, mo - 1, dy));
-    const day = d.getUTCDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(d);
-    monday.setUTCDate(d.getUTCDate() + diffToMonday);
-    const sunday = new Date(monday);
-    sunday.setUTCDate(monday.getUTCDate() + 6);
-    return {
-      start: monday.toISOString().substring(0, 10),
-      end: sunday.toISOString().substring(0, 10)
-    };
+  const weeklyPerformanceRows = performance?.weeklyHistory || [];
+  const latestPerformanceMark = [...weeklyPerformanceRows]
+    .reverse()
+    .find(week => week.rating !== null)?.rating ?? null;
+  const formatPerformanceHours = (hours: number) => {
+    const rounded = Math.round(hours * 100) / 100;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   };
-
-  const getMonthBounds = (dateStr: string) => {
-    const [yr, mo] = dateStr.split('-').map(Number);
-    const last = new Date(Date.UTC(yr, mo, 0)).getUTCDate();
-    return {
-      start: `${yr}-${String(mo).padStart(2, '0')}-01`,
-      end: `${yr}-${String(mo).padStart(2, '0')}-${String(last).padStart(2, '0')}`
-    };
+  const formatPerformanceMark = (mark: number) => {
+    const rounded = Math.round(mark * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
   };
-
-  const handleApplyPerfDateRange = async (start: string, end: string) => {
-    const range = normalizeDateRange(start, end);
-    const requestId = ++perfRequestIdRef.current;
-    try {
-      const res = await fetch(`/api/performance?startDate=${encodeURIComponent(range.start)}&endDate=${encodeURIComponent(range.end)}`);
-      if (requestId !== perfRequestIdRef.current) return;
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setPerformance(data[0]);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch performance for date range:', err);
-    }
-  };
-
-  const applyPerfView = (tab: 'daily' | 'weekly' | 'monthly' | 'custom', start: string, end: string) => {
-    const range = normalizeDateRange(start, end);
-    perfStartDateRef.current = range.start;
-    perfEndDateRef.current = range.end;
-    setPerfTab(tab);
-    setPerfStartDate(range.start);
-    setPerfEndDate(range.end);
-    handleApplyPerfDateRange(range.start, range.end);
-  };
-
-  const formatPerformanceDate = (dateStr: string) => {
-    try {
-      return new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'UTC',
-        weekday: 'long',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      }).format(new Date(`${dateStr}T00:00:00Z`));
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const formatPerformanceRange = (start: string, end: string) => {
-    const fmt = (dateStr: string) => {
-      try {
-        return new Intl.DateTimeFormat('en-IN', {
-          timeZone: 'UTC',
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric'
-        }).format(new Date(`${dateStr}T00:00:00Z`));
-      } catch {
-        return dateStr;
-      }
-    };
-    return `${fmt(start)} – ${fmt(end)}`;
-  };
-
-  const formatPerformanceMonth = (dateStr: string) => {
-    try {
-      return new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'UTC',
-        month: 'long',
-        year: 'numeric'
-      }).format(new Date(`${dateStr}T00:00:00Z`));
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const renderDirectorMarking = (marking: number | null | undefined) => {
-    const value = Number(marking);
-    if (marking === null || marking === undefined || Number.isNaN(value) || value < 1 || value > 5) {
-      return <span className="text-slate-400 font-semibold">Not Rated</span>;
-    }
-    return (
-      <span className="font-black text-amber-950">
-        {value} <span className="text-xs font-bold">/ 5</span>
-      </span>
-    );
-  };
-
-  const getRowTaskMarkings = (row: {
-    tasks?: string[];
-    taskMarkings?: Array<{ title: string; marking: number | null }>;
-  }) => {
-    if (row.taskMarkings && row.taskMarkings.length > 0) {
-      return row.taskMarkings;
-    }
-    return (row.tasks || []).map(title => ({ title, marking: null as number | null }));
-  };
-
-  const selectedPerfMetrics = performance?.custom;
-  const dayWiseRows = (selectedPerfMetrics?.dayWise || []).filter(row =>
-    (row.tasks && row.tasks.length > 0) || (Number(row.workHours) || 0) > 0
-  );
-  const selectedPeriodLabel = perfTab === 'daily'
-    ? formatPerformanceDate(perfStartDate)
-    : perfTab === 'weekly'
-      ? `Weekly Performance: ${formatPerformanceRange(perfStartDate, perfEndDate)}`
-      : perfTab === 'monthly'
-        ? formatPerformanceMonth(perfStartDate)
-        : formatPerformanceRange(perfStartDate, perfEndDate);
-  const selectedPeriodHeading = perfTab === 'daily'
-    ? 'DAILY PERFORMANCE'
-    : perfTab === 'weekly'
-      ? 'WEEKLY PERFORMANCE'
-      : perfTab === 'monthly'
-        ? 'MONTHLY PERFORMANCE'
-        : 'SELECTED PERIOD PERFORMANCE';
 
   const todayFormattedText = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -409,7 +296,7 @@ const EmployeeDashboard: React.FC = () => {
         fetch('/api/projects'),
         fetch('/api/reminders'),
         fetch('/api/flags'),
-        fetch(`/api/performance?startDate=${encodeURIComponent(perfStartDateRef.current)}&endDate=${encodeURIComponent(perfEndDateRef.current)}`),
+        fetch('/api/performance'),
         fetch('/api/daily-entries')
       ]);
 
@@ -494,20 +381,21 @@ const EmployeeDashboard: React.FC = () => {
     estimatedHours?: number;
   }): BoardTask => ({
     boardId: taskItem.taskId && taskItem.taskId !== 'OFFICE_WORK' ? `assigned_${taskItem.taskId}` : `board_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-    taskId: taskItem.taskId,
-    projectId: taskItem.projectId,
-    projectName: taskItem.projectName,
-    taskTitle: taskItem.taskTitle,
-    details: taskItem.details,
-    actionTaken: '',
-    date: todayDateStr,
-    hours: 0,
+      taskId: taskItem.taskId,
+      projectId: taskItem.projectId,
+      projectName: taskItem.projectName,
+      taskTitle: taskItem.taskTitle,
+      details: taskItem.details,
+      actionTaken: '',
+      date: todayDateStr,
+      hours: 0,
     flagged: false,
-    flagComment: '',
+      flagComment: '',
+    attachments: [],
     concernedPersonId: '',
     concernedPersonName: '',
-    workDone: 50,
-    status: 'In Progress',
+      workDone: 50,
+      status: 'In Progress',
     urgency: taskItem.urgency || 'SELF DEFINED',
     parentTaskId: taskItem.parentTaskId,
     parentTaskTitle: taskItem.parentTaskTitle,
@@ -515,38 +403,104 @@ const EmployeeDashboard: React.FC = () => {
     estimatedHours: taskItem.estimatedHours
   });
 
+  // Tasks stay on the board after submit so the next Action Taken can be typed in the same box.
+  const boardStorageKey = user?.id ? `daily_board_${user.id}` : '';
+  const boardRestoredKey = useRef('');
+  const restoredSubmittedRef = useRef(false);
+  const normalizeBoardItem = (item: BoardTask): BoardTask => {
+    if (!item || item.date === todayDateStr) return item;
+    return {
+      ...item,
+      date: todayDateStr,
+      actionTaken: '',
+      hours: 0,
+      hoursInput: '',
+      flagged: false,
+      flagComment: '',
+      attachments: [],
+      concernedPersonId: '',
+      concernedPersonName: ''
+    };
+  };
   useEffect(() => {
-    const submittedIds = new Set(
-      dailyHistory
-        .filter(entry => entry.date === todayDateStr)
-        .map(entry => entry.taskId)
-    );
+    if (!boardStorageKey || boardRestoredKey.current === boardStorageKey) return;
+    boardRestoredKey.current = boardStorageKey;
+    restoredSubmittedRef.current = false;
+    try {
+      const persistent = JSON.parse(window.localStorage.getItem(boardStorageKey) || '[]');
+      const legacyKey = `${boardStorageKey}_${todayDateStr}`;
+      const legacy = JSON.parse(window.localStorage.getItem(legacyKey) || '[]');
+      const saved = [...(Array.isArray(persistent) ? persistent : []), ...(Array.isArray(legacy) ? legacy : [])];
+      if (saved.length > 0) {
+        setDailyBoard(prev => {
+          const existing = new Set(prev.map(item => item.boardId));
+          const extra = saved
+            .filter((item: BoardTask) => item?.boardId && !existing.has(item.boardId))
+            .map(normalizeBoardItem);
+          return extra.length ? [...prev, ...extra] : prev;
+        });
+      }
+      window.localStorage.removeItem(legacyKey);
+    } catch {
+      window.localStorage.removeItem(boardStorageKey);
+    }
+  }, [boardStorageKey, todayDateStr]);
+  useEffect(() => {
+    if (!boardStorageKey || boardRestoredKey.current !== boardStorageKey) return;
+    if (dailyBoard.length === 0) {
+      window.localStorage.removeItem(boardStorageKey);
+    } else {
+      const persistedBoard = dailyBoard.map(item => {
+        const persistedItem = { ...item };
+        delete persistedItem.attachments;
+        return persistedItem;
+      });
+      window.localStorage.setItem(boardStorageKey, JSON.stringify(persistedBoard));
+    }
+  }, [dailyBoard, boardStorageKey]);
 
+  // Drop board items whose task no longer exists (e.g. the Director deleted the task or its project).
+  useEffect(() => {
+    if (loading || fetchError) return;
+    const knownTaskIds = new Set([...openingTasks, ...tasks].map(task => String(task.id || task._id || '')));
     setDailyBoard(prev => {
-      const existingIds = new Set(prev.map(item => item.taskId));
-      const additions: BoardTask[] = [];
-      for (const task of openingTasks) {
-        const taskId = task.id || task._id || '';
-        if (!taskId || task.status === 'Completed') continue;
-        if (submittedIds.has(taskId) || existingIds.has(taskId)) continue;
-        if (dismissedBoardTaskIds.current.has(taskId)) continue;
-        if (submittedTodayTaskIds.current.has(taskId)) continue;
-        additions.push(taskToBoardItem({
+      const next = prev.filter(item =>
+        !/^[a-f\d]{24}$/i.test(String(item.taskId || '')) || knownTaskIds.has(String(item.taskId))
+      );
+      return next.length === prev.length ? prev : next;
+    });
+  }, [loading, fetchError, openingTasks, tasks, dailyBoard.length]);
+
+  // After a submit, keep that task on the board so a white Action Taken stays in the same box.
+  useEffect(() => {
+    if (loading || fetchError || restoredSubmittedRef.current) return;
+    if (!boardStorageKey || boardRestoredKey.current !== boardStorageKey) return;
+    restoredSubmittedRef.current = true;
+    const todaySubmitted = dailyHistory.filter(entry => String(entry.date).substring(0, 10) === todayDateStr);
+    if (todaySubmitted.length === 0) return;
+    setDailyBoard(prev => {
+      const have = new Set(prev.map(item => String(item.taskId)));
+      const extras: BoardTask[] = [];
+      for (const entry of todaySubmitted) {
+        const taskId = String(entry.taskId || '');
+        if (!taskId || have.has(taskId) || extras.some(item => String(item.taskId) === taskId)) continue;
+        const task = [...openingTasks, ...tasks].find(t => String(t.id || t._id || '') === taskId);
+        extras.push(taskToBoardItem({
           taskId,
-          projectId: task.projectId,
-          projectName: task.projectName || 'Project',
-          taskTitle: task.title,
-          details: task.description || '',
-          urgency: getUrgencyFromPriority(task.priority),
-          parentTaskId: task.parentTaskId,
-          parentTaskTitle: task.parentTaskTitle,
-          dueDate: task.dueDate || task.reminderDate,
-          estimatedHours: task.estimatedHours
+          projectId: entry.projectId,
+          projectName: entry.projectName || task?.projectName || 'Project',
+          taskTitle: entry.taskTitle,
+          details: entry.details || task?.description || '',
+          urgency: task ? getUrgencyFromPriority(task.priority) : 'SELF DEFINED',
+          parentTaskId: task?.parentTaskId,
+          parentTaskTitle: task?.parentTaskTitle,
+          dueDate: task?.dueDate || task?.reminderDate,
+          estimatedHours: task?.estimatedHours
         }));
       }
-      return additions.length === 0 ? prev : [...prev, ...additions];
+      return extras.length ? [...prev, ...extras] : prev;
     });
-  }, [openingTasks, dailyHistory, todayDateStr]);
+  }, [loading, fetchError, dailyHistory, todayDateStr, boardStorageKey, openingTasks, tasks]);
 
   // Keep board cards in sync when the Director renames a task or project.
   useEffect(() => {
@@ -589,70 +543,14 @@ const EmployeeDashboard: React.FC = () => {
     dueDate?: string;
     estimatedHours?: number;
   }) => {
-    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.taskId && b.taskTitle === taskItem.taskTitle) ||
-      dailyHistory.some(entry =>
-        entry.date === todayDateStr &&
-        entry.taskId === taskItem.taskId &&
-        entry.taskTitle === taskItem.taskTitle
-      );
+    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.taskId && b.taskTitle === taskItem.taskTitle);
     if (alreadyExists) {
       showToast('error', `Task "${taskItem.taskTitle}" is already in your Daily Entry Task Board.`);
       return;
     }
 
-    dismissedBoardTaskIds.current.delete(taskItem.taskId);
     setDailyBoard(prev => [...prev, taskToBoardItem(taskItem)]);
     showToast('success', `Added "${taskItem.taskTitle}" to Daily Entry Task Board.`);
-  };
-
-  // Add Category Task to Daily Board
-  const handleAddCategoryTaskToDailyBoard = (taskItem: DisplayTaskItem) => {
-    const urgencyLabelMap: Record<CategoryType, BoardTask['urgency']> = {
-      URGENT: 'URGENT',
-      LESS_URGENT: 'LESS URGENT',
-      LOW_URGENT: 'LOW URGENT',
-      SELF_DEFINED: 'SELF DEFINED',
-      DAILY_TASK: 'DAILY TASK'
-    };
-
-    const alreadyExists = dailyBoard.some(b => b.taskId === taskItem.id) ||
-      dailyHistory.some(entry => entry.taskId === taskItem.id && entry.date === todayDateStr);
-    if (alreadyExists) {
-      showToast('error', `Task is already added to Daily Entry.`);
-      return;
-    }
-
-    const sourceTask = openingTasks.find(task => (task.id || task._id) === taskItem.id);
-    const newBoardItem: BoardTask = {
-      boardId: `assigned_${taskItem.id}`,
-      taskId: taskItem.id,
-      projectId: taskItem.projectId,
-      projectName: taskItem.projectName,
-      taskTitle: taskItem.title,
-      details: taskItem.description !== 'No description available' ? taskItem.description : '',
-      actionTaken: '',
-      date: todayDateStr,
-      hours: 0,
-      flagged: false,
-      flagComment: '',
-      concernedPersonId: '',
-      concernedPersonName: '',
-      workDone: 50,
-      status: 'In Progress',
-      urgency: urgencyLabelMap[taskItem.category],
-      parentTaskId: sourceTask?.parentTaskId,
-      parentTaskTitle: sourceTask?.parentTaskTitle,
-      dueDate: sourceTask?.dueDate || sourceTask?.reminderDate,
-      estimatedHours: sourceTask?.estimatedHours
-    };
-
-    dismissedBoardTaskIds.current.delete(taskItem.id);
-    setDailyBoard(prev => [...prev, newBoardItem]);
-    if (taskItem.category === 'DAILY_TASK') {
-      showToast('success', "Daily task added to Daily Entry Chart successfully.");
-    } else {
-      showToast('success', "Task added to Daily Entry Chart successfully.");
-    }
   };
 
   const renderDescription = (text: string) => {
@@ -680,10 +578,6 @@ const EmployeeDashboard: React.FC = () => {
   // Remove Task from Board
   const confirmRemoveBoardItem = () => {
     if (!removeTargetId) return;
-    const removed = dailyBoard.find(item => item.boardId === removeTargetId);
-    if (removed?.taskId && removed.taskId !== 'OFFICE_WORK') {
-      dismissedBoardTaskIds.current.add(removed.taskId);
-    }
     setDailyBoard(prev => prev.filter(item => item.boardId !== removeTargetId));
     setFieldErrors(prev => {
       const copy = { ...prev };
@@ -840,12 +734,73 @@ const EmployeeDashboard: React.FC = () => {
     setBoardGlobalError(null);
   };
 
+  const handleBoardAttachmentSelect = async (boardId: string, files: FileList | null) => {
+    const selectedFiles = Array.from(files || []);
+    if (selectedFiles.length === 0) return;
+    if (selectedFiles.some(file => !DAILY_COMMENT_ATTACHMENT_TYPES.has(file.type))) {
+      showToast('error', 'Only PNG, JPG, PDF, and TXT attachments are supported.');
+      return;
+    }
+    const existingAttachments = dailyBoard.find(item => item.boardId === boardId)?.attachments || [];
+    const selectedSize = selectedFiles.reduce((total, file) => total + file.size, 0);
+    if (existingAttachments.length + selectedFiles.length > 5) {
+      showToast('error', 'Attach up to 5 files to each daily comment.');
+      return;
+    }
+    if (existingAttachments.reduce((total, attachment) => total + attachment.fileSize, selectedSize) > MAX_DAILY_COMMENT_ATTACHMENT_BYTES) {
+      showToast('error', 'Attachments must total 2 MB or less per daily comment.');
+      return;
+    }
+    try {
+      const attachments = await Promise.all(selectedFiles.map(readDailyCommentAttachment));
+      updateBoardItem(boardId, { attachments: [...existingAttachments, ...attachments] });
+    } catch (error) {
+      console.error('Failed to read daily comment attachment:', error);
+      showToast('error', error instanceof Error ? error.message : 'Failed to read attachment.');
+    }
+  };
+
+  const removeBoardAttachment = (boardId: string, attachmentId: string) => {
+    const item = dailyBoard.find(boardItem => boardItem.boardId === boardId);
+    if (!item) return;
+    updateBoardItem(boardId, {
+      attachments: (item.attachments || []).filter(attachment => attachment.id !== attachmentId)
+    });
+  };
+
   // Submit Daily Entry Validation & Action (Page 3 Submit Validation)
+  const knownTaskParentId = (taskId?: string) =>
+    String([...openingTasks, ...tasks].find(t => String(t.id || t._id || '') === String(taskId || ''))?.parentTaskId || '');
+  const subtaskParentIdsOnBoard = new Set(
+    dailyBoard
+      .map(item => String(item.parentTaskId || knownTaskParentId(item.taskId)))
+      .filter(parentId => parentId && parentId !== 'undefined')
+  );
+  // A main task whose subtasks are on the board only works as a heading; work is logged on the subtasks.
+  const isBoardHeadingTask = (taskId?: string) => subtaskParentIdsOnBoard.has(String(taskId || ''));
+
   const handleSubmitDailyBoard = async () => {
     setBoardGlobalError(null);
+    const workRows = dailyBoard.filter(item => !isBoardHeadingTask(item.taskId));
 
-    if (dailyBoard.length === 0) {
+    if (workRows.length === 0) {
       setBoardGlobalError('Your Daily Entry Task Board is empty. Add at least one task to submit today\'s entry.');
+      return;
+    }
+
+    // Only rows the employee has started filling are submitted; untouched rows stay on the board for later.
+    const hasHoursInput = (item: BoardTask) => {
+      const source = item.hoursInput !== undefined ? item.hoursInput : item.hours;
+      return source !== undefined && source !== null && String(source).trim() !== '' && source !== 0;
+    };
+    const boardItems = workRows.filter(item =>
+      Boolean(item.actionTaken && item.actionTaken.trim()) || hasHoursInput(item) || item.flagged
+    );
+
+    if (boardItems.length === 0) {
+      setFieldErrors({});
+      setBoardGlobalError('Fill Action Taken and Hours for at least one task to submit.');
+      showToast('error', 'Fill Action Taken and Hours for at least one task to submit.');
       return;
     }
 
@@ -854,7 +809,7 @@ const EmployeeDashboard: React.FC = () => {
     let hasValidationFailure = false;
     let missingFieldMsg = '';
 
-    for (const item of dailyBoard) {
+    for (const item of boardItems) {
       const itemErr: { actionTaken?: string; hours?: string; flagged?: string; flagComment?: string; status?: string } = {};
 
       if (!item.actionTaken || !item.actionTaken.trim()) {
@@ -904,12 +859,12 @@ const EmployeeDashboard: React.FC = () => {
       const res = await fetch('/api/daily-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dailyBoard.map(b => ({
+        body: JSON.stringify(boardItems.map(b => ({
           taskId: b.taskId,
           projectId: b.projectId,
           projectName: b.projectName,
           taskTitle: b.taskTitle,
-          details: b.details,
+          details: (b.details || '').trim() || b.taskTitle,
           actionTaken: b.actionTaken,
           date: b.date,
           hours: b.hours,
@@ -918,7 +873,8 @@ const EmployeeDashboard: React.FC = () => {
           concernedPersonId: b.concernedPersonId,
           concernedPersonName: b.concernedPersonName,
           workDone: b.workDone,
-          status: b.status
+          status: b.status,
+          attachments: b.attachments || []
         })))
       });
 
@@ -929,12 +885,23 @@ const EmployeeDashboard: React.FC = () => {
         return;
       }
 
-      showToast('success', 'Daily entry submitted successfully.');
-      dailyBoard.forEach(item => {
-        if (item.taskId) submittedTodayTaskIds.current.add(item.taskId);
-      });
-      setDailyBoard([]);
+      const submittedBoardIds = new Set(boardItems.map(item => item.boardId));
+      setDailyBoard(prev => prev.map(item => {
+        if (!submittedBoardIds.has(item.boardId)) return item;
+        return {
+          ...item,
+          actionTaken: '',
+          hours: 0,
+          hoursInput: '',
+          flagged: false,
+          flagComment: '',
+          concernedPersonId: '',
+          concernedPersonName: '',
+          date: todayDateStr
+        };
+      }));
       setFieldErrors({});
+      showToast('success', `Submitted ${boardItems.length} ${boardItems.length === 1 ? 'task' : 'tasks'}. You can add the next Action Taken in the same box.`);
       await fetchData(false);
     } catch (err) {
       showToast('error', 'Network error. Failed to submit daily entry.');
@@ -1136,27 +1103,149 @@ const EmployeeDashboard: React.FC = () => {
 
   const currentCategoryConfig = CATEGORIES.find(c => c.id === activeCategory) || CATEGORIES[4];
 
-  const matchingDbTasks: DisplayTaskItem[] = openingTasks
-    .filter(t => t.status !== 'Completed')
-    .filter(t => Boolean(t.id || t._id))
-    .filter(t => mapPriorityToCategory(t.priority) === activeCategory)
-    .map(t => ({
-      id: t.id || t._id || '',
-      projectId: t.projectId || 'GENERAL',
-      projectName: t.projectName || 'Project',
-      title: t.title,
-      description: t.description || 'No description available',
-      category: activeCategory,
-      parentTaskId: t.parentTaskId
-    }));
-
-  const combinedCategoryTasks = matchingDbTasks;
   const availableAssignedTasks = openingTasks
     .filter(task => task.status !== 'Completed')
     .filter(task => urgencyFilter === 'ALL' || getUrgencyFromPriority(task.priority) === urgencyFilter);
-  const groupedCategoryTasks = groupItemsByProject(
-    orderMainTasksFirst(combinedCategoryTasks, t => t.id, t => t.parentTaskId)
+  const taskCodeById = new Map([...openingTasks, ...tasks].map(t => [String(t.id || t._id || ''), t.taskCode || '']));
+  const projectCodeById = new Map(projects.map(p => [String(p.id || p._id || ''), p.projectCode || '']));
+  const taskCodeOf = (taskId?: string) => taskCodeById.get(String(taskId || '')) || '';
+  const taskById = new Map([...openingTasks, ...tasks].map(t => [String(t.id || t._id || ''), t]));
+  const boardParentOf = (taskId?: string, parentTaskId?: string) => {
+    const id = String(taskId || '');
+    const parentId = String(parentTaskId || taskById.get(id)?.parentTaskId || '');
+    if (!parentId || parentId === id) return undefined;
+    const parent = taskById.get(parentId);
+    return {
+      id: parentId,
+      title: parent?.title || taskById.get(id)?.parentTaskTitle || 'Parent task',
+      code: parent?.taskCode || ''
+    };
+  };
+  const projectHeading = (group: { projectId: string; projectName: string }) => {
+    const code = projectCodeById.get(String(group.projectId));
+    if (!code) return group.projectName;
+    const shown = formatHierarchyCode(code);
+    const name = String(group.projectName || '').trim();
+    if (!name || name.toLowerCase() === shown.toLowerCase() || name.toLowerCase() === String(code).toLowerCase()) {
+      return shown;
+    }
+    return `${shown} — ${name}`;
+  };
+  const cleanTaskTitle = (title?: string) => String(title || '').replace(/^[\s\-–•]+/, '');
+  const taskIdOf = (task: Task) => String(task.id || task._id || '');
+  const completedHistoryEmployeeId = String(user?.id || user?._id || '');
+  const completedHistoryProjectOptions = new Map<string, string>();
+  projects.forEach(project => {
+    const id = String(project.id || project._id || '');
+    if (id) completedHistoryProjectOptions.set(id, project.projectName);
+  });
+  dailyHistory.forEach(entry => {
+    const id = String(entry.projectId || '');
+    if (id && !completedHistoryProjectOptions.has(id)) {
+      completedHistoryProjectOptions.set(id, entry.projectName || 'Project');
+    }
+  });
+  tasks.forEach(task => {
+    const id = String(task.projectId || '');
+    if (id && !completedHistoryProjectOptions.has(id)) {
+      completedHistoryProjectOptions.set(id, task.projectName || 'Project');
+    }
+  });
+  const completedHistoryDateKey = (value?: string) => {
+    const rawDate = String(value || '');
+    if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) return rawDate.slice(0, 10);
+    const date = new Date(rawDate);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  };
+  const matchesCompletedHistoryTime = (value?: string) => {
+    const dateKey = completedHistoryDateKey(value);
+    if (!dateKey) return false;
+    if (completedHistoryTimeFilter === 'all') return true;
+    if (dateKey > todayDateStr) return false;
+    if (completedHistoryTimeFilter === 'date') return dateKey === todayDateStr;
+    if (completedHistoryTimeFilter === 'month') return dateKey.slice(0, 7) === todayDateStr.slice(0, 7);
+
+    const weekStart = new Date(`${todayDateStr}T00:00:00Z`);
+    const mondayOffset = (weekStart.getUTCDay() + 6) % 7;
+    weekStart.setUTCDate(weekStart.getUTCDate() - mondayOffset);
+    return dateKey >= weekStart.toISOString().slice(0, 10);
+  };
+  const filteredCompletedDailyHistory = dailyHistory.filter(entry =>
+    (completedHistoryProjectFilter === 'ALL' || String(entry.projectId) === completedHistoryProjectFilter) &&
+    (completedHistoryEmployeeFilter === 'ALL' || String(entry.employeeId) === completedHistoryEmployeeId) &&
+    matchesCompletedHistoryTime(entry.date)
   );
+  const filteredCompletedTasks = tasks.filter(task =>
+    task.status === 'Completed' &&
+    (completedHistoryProjectFilter === 'ALL' || String(task.projectId) === completedHistoryProjectFilter) &&
+    (completedHistoryEmployeeFilter === 'ALL' ||
+      (task.assignedEmployeeIds || []).some(id => String(id) === completedHistoryEmployeeId)) &&
+    matchesCompletedHistoryTime(task.approvalDate || task.updatedAt)
+  );
+
+  type CategoryTaskRow = {
+    key: string;
+    projectName: string;
+    title: string;
+    code: string;
+    description: string;
+    subtasks: Task[];
+    addables: Task[];
+  };
+  const openAssignedTasks = openingTasks.filter(t => t.status !== 'Completed' && taskIdOf(t));
+  const categoryRowMap = new Map<string, CategoryTaskRow>();
+  for (const t of openAssignedTasks) {
+    if (mapPriorityToCategory(t.priority) !== activeCategory) continue;
+    const id = taskIdOf(t);
+    const parentId = String(t.parentTaskId || '');
+    const mainId = parentId && parentId !== id ? parentId : id;
+    if (categoryRowMap.has(mainId)) continue;
+    const main = mainId === id ? t : taskById.get(mainId);
+    const subtasks = sortByHierarchyCode(
+      openAssignedTasks.filter(child => String(child.parentTaskId || '') === mainId && taskIdOf(child) !== mainId),
+      child => child.taskCode
+    );
+    const assignedMain = openAssignedTasks.find(task => taskIdOf(task) === mainId);
+    categoryRowMap.set(mainId, {
+      key: mainId,
+      projectName: main?.projectName || t.projectName || 'Project',
+      title: cleanTaskTitle(main?.title || t.parentTaskTitle || t.title),
+      code: main?.taskCode || '',
+      description: main?.description || '',
+      subtasks,
+      addables: [assignedMain || (main || t)]
+    });
+  }
+  const categoryTaskRows = sortByHierarchyCode(Array.from(categoryRowMap.values()), row => row.code);
+
+  const submittedTodayIds = new Set(
+    dailyHistory.filter(entry => entry.date === todayDateStr).map(entry => entry.taskId)
+  );
+  const isTaskOnBoardOrSubmitted = (task: Task) =>
+    dailyBoard.some(item => item.taskId === taskIdOf(task)) || submittedTodayIds.has(taskIdOf(task));
+
+  const handleAddTaskRowToDailyBoard = (row: CategoryTaskRow) => {
+    const additions = row.addables
+      .filter(task => !isTaskOnBoardOrSubmitted(task))
+      .map(task => taskToBoardItem({
+        taskId: taskIdOf(task),
+        projectId: task.projectId,
+        projectName: task.projectName || 'Project',
+        taskTitle: task.title,
+        details: task.description || '',
+        urgency: getUrgencyFromPriority(task.priority),
+        parentTaskId: task.parentTaskId,
+        parentTaskTitle: task.parentTaskTitle,
+        dueDate: task.dueDate || task.reminderDate,
+        estimatedHours: task.estimatedHours
+      }));
+    if (additions.length === 0) {
+      showToast('error', 'Task is already added to Daily Entry Chart.');
+      return;
+    }
+    setDailyBoard(prev => [...prev, ...additions]);
+    showToast('success', `"${row.title}" added to Daily Entry Chart.`);
+  };
   const groupedAssignedTasks = groupItemsByProject(
     availableAssignedTasks.map(t => ({
       ...t,
@@ -1165,7 +1254,7 @@ const EmployeeDashboard: React.FC = () => {
     }))
   );
   const groupedEmployeeTasks = groupItemsByProject(
-    tasks.map(t => ({
+    sortByHierarchyCode(tasks, t => t.taskCode).map(t => ({
       ...t,
       projectId: t.projectId,
       projectName: t.projectName || 'Project'
@@ -1177,11 +1266,59 @@ const EmployeeDashboard: React.FC = () => {
       ? entry.taskId === taskId
       : entry.taskTitle === taskTitle && String(entry.projectId) === String(projectId);
 
+  const recentHistoryStart = new Date(`${todayDateStr}T00:00:00Z`);
+  recentHistoryStart.setUTCDate(recentHistoryStart.getUTCDate() - (BOARD_HISTORY_DAYS - 1));
+  const recentHistoryStartDate = recentHistoryStart.toISOString().slice(0, 10);
   const taskEntryHistory = (taskId: string, taskTitle: string, projectId: string) =>
     dailyHistory
-      .filter(entry => entryMatchesTask(entry, taskId, taskTitle, projectId))
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-      .slice(-BOARD_HISTORY_ROWS);
+      .filter(entry => {
+        const entryDate = String(entry.date || '').slice(0, 10);
+        return entryMatchesTask(entry, taskId, taskTitle, projectId) &&
+          entryDate >= recentHistoryStartDate &&
+          entryDate <= todayDateStr;
+      })
+      .sort((a, b) =>
+        String(b.date || '').localeCompare(String(a.date || '')) ||
+        String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+      );
+
+  const submittedWorkProjectOptions = Array.from(
+    dailyHistory.reduce((projectsById, entry) => {
+      const id = String(entry.projectId || '');
+      if (id && !projectsById.has(id)) {
+        projectsById.set(id, entry.projectName || 'Project');
+      }
+      return projectsById;
+    }, new Map<string, string>()),
+    ([id, name]) => ({ id, name })
+  ).sort((a, b) => a.name.localeCompare(b.name));
+  const submittedWorkTaskOptions = Array.from(
+    dailyHistory
+      .filter(entry => submittedWorkProjectFilter === 'ALL' || String(entry.projectId) === submittedWorkProjectFilter)
+      .reduce((tasksByKey, entry) => {
+        const key = JSON.stringify([entry.projectId, entry.taskId, entry.taskTitle]);
+        if (!tasksByKey.has(key)) {
+          tasksByKey.set(key, {
+            key,
+            taskId: String(entry.taskId || ''),
+            projectId: String(entry.projectId || ''),
+            taskTitle: entry.taskTitle || 'Task'
+          });
+        }
+        return tasksByKey;
+      }, new Map<string, { key: string; taskId: string; projectId: string; taskTitle: string }>())
+      .values()
+  ).sort((a, b) => a.taskTitle.localeCompare(b.taskTitle));
+  const filteredSubmittedWork = dailyHistory
+    .filter(entry =>
+      (submittedWorkProjectFilter === 'ALL' || String(entry.projectId) === submittedWorkProjectFilter) &&
+      (submittedWorkTaskFilter === 'ALL' ||
+        JSON.stringify([entry.projectId, entry.taskId, entry.taskTitle]) === submittedWorkTaskFilter)
+    )
+    .sort((a, b) =>
+      String(b.date || '').localeCompare(String(a.date || '')) ||
+      String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    );
 
   const submittedOnlyBlocks: BoardBlock[] = [];
   for (const entry of todayEntries) {
@@ -1192,8 +1329,8 @@ const EmployeeDashboard: React.FC = () => {
       key: `submitted_${entry.id || entry._id || entry.taskId}`,
       taskId: entry.taskId,
       projectId: entry.projectId,
-      projectName: entry.projectName || 'Project',
-      taskTitle: entry.taskTitle,
+        projectName: entry.projectName || 'Project',
+        taskTitle: entry.taskTitle,
       details: entry.details || '',
       history: taskEntryHistory(entry.taskId, entry.taskTitle, entry.projectId)
     });
@@ -1204,8 +1341,8 @@ const EmployeeDashboard: React.FC = () => {
       key: item.boardId,
       taskId: item.taskId,
       projectId: item.projectId,
-      projectName: item.projectName,
-      taskTitle: item.taskTitle,
+        projectName: item.projectName,
+        taskTitle: item.taskTitle,
       details: item.details,
       urgency: item.urgency,
       item,
@@ -1214,167 +1351,331 @@ const EmployeeDashboard: React.FC = () => {
     ...submittedOnlyBlocks
   ];
   const boardBlockGroups = groupItemsByProject(
-    orderMainTasksFirst(boardBlocks, block => block.taskId, block => block.item?.parentTaskId)
+    sortByHierarchyCode(
+      orderMainTasksFirst(boardBlocks, block => block.taskId, block => block.item?.parentTaskId),
+      block => taskCodeOf(block.taskId)
+    )
   );
 
-  const renderBoardBlock = (block: BoardBlock) => {
+  const boardBlockRows = (block: BoardBlock) => {
     const item = block.item;
     const errs = item ? fieldErrors[item.boardId] : undefined;
     const isFlagged = item?.flagged === true;
-    const rowCount = block.history.length + (item ? 1 : 0);
-    if (rowCount === 0) return null;
+    const submittedEntries = block.history;
+    if (!item && submittedEntries.length === 0) return [];
+    const isTodayEntry = (dateStr: string) => String(dateStr || '').substring(0, 10) === todayDateStr;
 
-    const rowBg = (index: number) => (index % 2 === 0 ? 'bg-[#E9EBF5]' : 'bg-[#CFD5EA]');
+    return [{
+      key: `${block.key}-box`,
+      cells: (
+        <>
+          <td className="p-0 border border-white align-top">
+            {submittedEntries.length > 0 && (
+              <p className="px-3 pt-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                Recent submissions · last 5 days
+              </p>
+            )}
+            {submittedEntries.map((entry, index) => {
+              return (
+                <div
+                  key={entry.id || entry._id || `${block.key}-act-${index}`}
+                  className="px-3 py-1.5 text-sm text-black break-words"
+                >
+                  <span className="mr-1 text-[10px] font-semibold text-slate-500">{formatBoardDate(entry.date)}:</span>
+                  <span className="bg-[#00B050] px-1">{entry.actionTaken || '—'}</span>
+                  <span className="ml-1 text-[10px] font-semibold text-slate-600">
+                    ({formatHoursMinutes(Number(entry.hours) || 0)})
+                  </span>
+                  {!!entry.attachments?.length && (
+                    <span className="mt-1 flex flex-wrap gap-2">
+                      {entry.attachments.map(attachment => (
+                        <a
+                          key={attachment.id}
+                          href={`/api/daily-entries/${entry.id || entry._id}/attachments/${attachment.id}`}
+                          download={attachment.fileName}
+                          className="text-xs font-semibold text-blue-700 underline"
+                        >
+                          {attachment.fileName}
+                        </a>
+                      ))}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {item && (
+              <div className="px-3 py-2">
+                <textarea
+                  rows={2}
+                  value={item.actionTaken}
+                  onChange={(e) => updateBoardItem(item.boardId, { actionTaken: e.target.value })}
+                  placeholder="Action taken"
+                  className={`w-full resize-y px-2 py-1 text-sm text-black placeholder:text-black/60 border bg-white focus:outline-none focus:ring-2 ${
+                    errs?.actionTaken
+                      ? 'border-rose-500 focus:ring-rose-500'
+                      : 'border-slate-300 focus:ring-[#4472C4]'
+                  }`}
+                />
+                {errs?.actionTaken && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.actionTaken}</p>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50">
+                    <span>Attach files</span>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".png,.jpg,.jpeg,.pdf,.txt"
+                      className="sr-only"
+                      onChange={event => {
+                        void handleBoardAttachmentSelect(item.boardId, event.currentTarget.files);
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                  </label>
+                  <span className="text-[10px] text-slate-500">PNG, JPG, PDF, TXT · up to 2 MB · submit before leaving</span>
+                </div>
+                {!!item.attachments?.length && (
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {item.attachments.map(attachment => (
+                      <span key={attachment.id} className="inline-flex max-w-full items-center gap-1 rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-800">
+                        <span className="truncate">{attachment.fileName}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${attachment.fileName}`}
+                          onClick={() => removeBoardAttachment(item.boardId, attachment.id)}
+                          className="font-bold text-blue-900 hover:text-rose-600"
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {isFlagged && (
+                  <textarea
+                    rows={2}
+                    value={item.flagComment}
+                    onChange={(e) => updateBoardItem(item.boardId, { flagComment: e.target.value })}
+                    placeholder="Reason for flag / blocker..."
+                    className="mt-1 w-full px-2 py-1 text-xs border border-[#ED7D31] bg-orange-50 text-orange-950 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  />
+                )}
+              </div>
+            )}
+          </td>
+          <td className="p-0 border border-white align-top">
+            {submittedEntries.map((entry, index) => {
+              const today = isTodayEntry(entry.date);
+              return (
+                <div
+                  key={entry.id || entry._id || `${block.key}-date-${index}`}
+                  className="px-3 py-1.5 text-sm text-black"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className={`whitespace-nowrap ${today ? 'bg-[#00B050] px-1' : ''}`}>
+                      {formatBoardDate(entry.date)}
+                    </span>
+                    {entry.flagged && (
+                      <span className="px-2 py-0.5 bg-[#ED7D31] border border-[#4472C4] text-white text-[10px] font-semibold">
+                        Flag
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {item && (
+              <div className="px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="inline-block px-1.5 py-0.5 text-sm text-black whitespace-nowrap bg-white border border-slate-200">
+                    {formatBoardDate(item.date)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updateBoardItem(item.boardId, isFlagged
+                      ? { flagged: false, flagComment: '', concernedPersonId: '', concernedPersonName: '' }
+                      : { flagged: true })}
+                    className={`px-2 py-0.5 text-[10px] font-semibold text-white border transition cursor-pointer ${
+                      isFlagged
+                        ? 'bg-[#C55A11] border-red-700 ring-2 ring-red-500'
+                        : 'bg-[#ED7D31] border-[#4472C4] hover:bg-[#C55A11]'
+                    }`}
+                    title={isFlagged ? 'Remove flag' : 'Flag this task'}
+                    aria-pressed={isFlagged}
+                  >
+                    Flag
+                  </button>
+                </div>
+              </div>
+            )}
+          </td>
+          <td className="p-0 border border-white text-center align-top">
+            {submittedEntries.map((entry, index) => {
+              const today = isTodayEntry(entry.date);
+              return (
+                <div
+                  key={entry.id || entry._id || `${block.key}-hrs-${index}`}
+                  className="px-3 py-1.5 text-sm font-semibold"
+                >
+                  <span className={today ? 'bg-[#00B050] px-1 text-black' : 'text-[#0070C0]'}>
+                    {formatHoursMinutes(entry.hours)}
+                  </span>
+                </div>
+              );
+            })}
+            {item && (
+              <div className="px-3 py-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Hours"
+                  value={item.hoursInput !== undefined ? item.hoursInput : (item.hours ? hoursToHHMM(item.hours) : '')}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const parsed = parseTimeInput(val);
+                    updateBoardItem(item.boardId, {
+                      hours: parsed.ok ? parsed.hours : 0,
+                      hoursInput: val
+                    });
+                  }}
+                  className={`w-20 px-1.5 py-1 text-sm font-bold text-center text-black placeholder:text-[#0070C0] border bg-white focus:outline-none focus:ring-2 ${
+                    errs?.hours
+                      ? 'border-rose-500 focus:ring-rose-500'
+                      : 'border-slate-300 focus:ring-[#4472C4]'
+                  }`}
+                />
+                {errs?.hours && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.hours}</p>
+                )}
+              </div>
+            )}
+          </td>
+        </>
+      )
+    }];
+  };
+
+  type BoardTaskGroup = {
+    key: string;
+    projectId: string;
+    projectName: string;
+    mainId: string;
+    mainTitle: string;
+    mainCode: string;
+    blocks: BoardBlock[];
+  };
+  const boardTaskGroups: BoardTaskGroup[] = [];
+  for (const group of boardBlockGroups) {
+    const byMain = new Map<string, BoardTaskGroup>();
+    for (const block of group.items) {
+      const parent = boardParentOf(block.taskId, block.item?.parentTaskId);
+      const hasTaskId = Boolean(block.taskId) && block.taskId !== 'OFFICE_WORK';
+      const mainId = parent?.id || (hasTaskId ? String(block.taskId) : '');
+      const key = `${group.projectId}:${mainId || block.key}`;
+      let taskGroup = byMain.get(key);
+      if (!taskGroup) {
+        taskGroup = {
+          key,
+          projectId: group.projectId,
+          projectName: group.projectName,
+          mainId,
+          mainTitle: parent ? parent.title : block.taskTitle,
+          mainCode: parent ? parent.code : taskCodeOf(block.taskId),
+          blocks: []
+        };
+        byMain.set(key, taskGroup);
+        boardTaskGroups.push(taskGroup);
+      }
+      taskGroup.blocks.push(block);
+    }
+  }
+
+  const boardTaskLabel = (code: string, title: string) => {
+    const shownCode = formatHierarchyCode(code);
+    if (!shownCode) return title;
+    return titleRepeatsCode(title, code) ? shownCode : `${shownCode} ${title}`;
+  };
+
+  const renderBoardTaskGroup = (taskGroup: BoardTaskGroup) => {
+    const mainBlock = taskGroup.blocks.find(block => String(block.taskId) === taskGroup.mainId && taskGroup.mainId);
+    const subtaskLines = new Map<string, { id: string; title: string; code: string; block?: BoardBlock }>();
+    if (taskGroup.mainId) {
+      sortByHierarchyCode(
+        Array.from(taskById.values()).filter(t => String(t.parentTaskId || '') === taskGroup.mainId),
+        t => t.taskCode
+      ).forEach(t => {
+        const id = String(t.id || t._id || '');
+        subtaskLines.set(id, { id, title: t.title, code: t.taskCode || '' });
+      });
+    }
+    for (const block of taskGroup.blocks) {
+      if (block === mainBlock || !taskGroup.mainId || String(block.taskId) === taskGroup.mainId) continue;
+      const id = String(block.taskId);
+      const existing = subtaskLines.get(id);
+      subtaskLines.set(id, existing
+        ? { ...existing, block }
+        : { id, title: block.taskTitle, code: taskCodeOf(block.taskId), block });
+    }
+
+    const hasSubtaskBlocks = taskGroup.blocks.some(block => block !== mainBlock);
+    // Only render one Action taken box per task group — use mainBlock if available, otherwise the first block
+    const primaryBlock = mainBlock || taskGroup.blocks[0];
+    const rows = primaryBlock ? boardBlockRows(primaryBlock) : [];
+    if (rows.length === 0) return null;
+
+    const projectCode = projectCodeById.get(String(taskGroup.projectId)) || '';
+    const urgency = (mainBlock || taskGroup.blocks[0])?.urgency;
+    const removeButton = (block?: BoardBlock) => block?.item ? (
+      <button
+        onClick={() => setRemoveTargetId(block.item!.boardId)}
+        className="p-0.5 text-slate-500 hover:text-rose-600 hover:bg-white/60 rounded transition cursor-pointer flex-shrink-0"
+        title="Remove task from daily board"
+        aria-label={`Remove ${block.item.taskTitle} from daily board`}
+      >
+        <Trash2 size={13} />
+      </button>
+    ) : null;
 
     const taskCell = (
-      <td rowSpan={rowCount} className="align-top pl-6 pr-3 py-2 bg-[#CFD5EA] border border-white">
+      <td rowSpan={rows.length} className="align-top px-3 py-2 bg-[#CFD5EA] border border-white">
+        <p className="text-base font-bold text-black leading-snug break-words" title={taskGroup.projectName}>
+          {formatHierarchyCode(projectCode) || taskGroup.projectName}
+        </p>
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-black leading-snug break-words">
-              <span className="mr-1.5">-</span>{block.taskTitle}
-            </p>
-            {block.details && block.details.trim().toLowerCase() !== block.taskTitle.trim().toLowerCase() && (
-              <p className="pl-3 text-[13px] text-slate-700 leading-snug whitespace-pre-line break-words">{block.details}</p>
-            )}
-            {block.urgency && (
-              <span className={`inline-block mt-1 px-1.5 py-px text-[9px] font-bold tracking-wide rounded whitespace-nowrap ${
-                block.urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
-                block.urgency === 'LESS URGENT' ? 'bg-amber-100 text-amber-800' :
-                block.urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
-                block.urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
-                'bg-indigo-100 text-indigo-800'
-              }`}>
-                {block.urgency}
-              </span>
-            )}
-          </div>
-          {item && (
-            <button
-              onClick={() => setRemoveTargetId(item.boardId)}
-              className="p-1 text-slate-500 hover:text-rose-600 hover:bg-white/60 rounded transition cursor-pointer flex-shrink-0"
-              title="Remove task from daily board"
-              aria-label={`Remove ${item.taskTitle} from daily board`}
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
+          <p className="text-base font-bold text-black leading-snug break-words">
+            {boardTaskLabel(taskGroup.mainCode, taskGroup.mainTitle)}
+          </p>
+          {!hasSubtaskBlocks && removeButton(mainBlock || (!taskGroup.mainId ? taskGroup.blocks[0] : undefined))}
         </div>
+        {Array.from(subtaskLines.values()).map(sub => (
+          <div key={sub.id} className="flex items-start justify-between gap-2">
+            <p className="text-sm text-black leading-snug break-words">
+              - {boardTaskLabel(sub.code, sub.title)}
+            </p>
+            {removeButton(sub.block)}
+          </div>
+        ))}
+        {urgency && (
+          <span className={`inline-block mt-1 px-1.5 py-px text-[9px] font-bold tracking-wide rounded whitespace-nowrap ${
+            urgency === 'URGENT' ? 'bg-red-100 text-red-800' :
+            urgency === 'LESS URGENT' ? 'bg-slate-100 text-slate-700 border border-slate-300' :
+            urgency === 'LOW URGENT' ? 'bg-purple-100 text-purple-800' :
+            urgency === 'DAILY TASK' ? 'bg-emerald-100 text-emerald-800' :
+            'bg-indigo-100 text-indigo-800'
+          }`}>
+            {urgency}
+          </span>
+        )}
       </td>
     );
 
-    const rows = block.history.map((entry, index) => (
-      <tr key={`${block.key}-h-${entry.id || entry._id || index}`} className={rowBg(index)}>
+    return rows.map((row, index) => (
+      <tr key={row.key} className={index % 2 === 0 ? 'bg-[#E9EBF5]' : 'bg-[#CFD5EA]'}>
         {index === 0 && taskCell}
-        <td className="px-3 py-2 border border-white text-sm text-black align-top break-words">
-          {entry.actionTaken || '—'}
-        </td>
-        <td className="px-3 py-2 border border-white text-sm text-black align-top whitespace-nowrap">
-          {formatBoardDate(entry.date)}
-        </td>
-        <td className="px-2 py-2 border border-white text-center align-top">
-          {entry.flagged && (
-            <span className="inline-block px-2 py-0.5 bg-[#ED7D31] border border-[#4472C4] text-white text-[10px] font-semibold">
-              Flag
-            </span>
-          )}
-        </td>
-        <td className="px-3 py-2 border border-white text-center text-sm font-semibold text-[#0070C0] align-top">
-          {formatHoursMinutes(entry.hours)}
-        </td>
+        {row.cells}
       </tr>
     ));
-
-    if (item) {
-      rows.push(
-        <tr key={`${block.key}-today`} className={rowBg(block.history.length)}>
-          {block.history.length === 0 && taskCell}
-          <td className="px-3 py-2 border border-white align-top">
-            <textarea
-              rows={2}
-              value={item.actionTaken}
-              onChange={(e) => updateBoardItem(item.boardId, { actionTaken: e.target.value })}
-              placeholder="Action taken"
-              className={`w-full resize-y px-2 py-1 text-sm text-black placeholder:text-black/60 border focus:outline-none focus:ring-2 ${
-                errs?.actionTaken
-                  ? 'bg-rose-100 border-rose-500 focus:ring-rose-500'
-                  : 'bg-[#00B050] border-[#00B050] focus:ring-emerald-900'
-              }`}
-            />
-            {errs?.actionTaken && (
-              <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.actionTaken}</p>
-            )}
-            {isFlagged && (
-              <textarea
-                rows={2}
-                value={item.flagComment}
-                onChange={(e) => updateBoardItem(item.boardId, { flagComment: e.target.value })}
-                placeholder="Reason for flag / blocker..."
-                className="mt-1 w-full px-2 py-1 text-xs border border-[#ED7D31] bg-orange-50 text-orange-950 focus:outline-none focus:ring-2 focus:ring-orange-400"
-              />
-            )}
-            <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={item.status === 'Completed'}
-                onChange={(e) => updateBoardItem(item.boardId, e.target.checked
-                  ? { status: 'Completed', workDone: 100 }
-                  : { status: 'In Progress', workDone: item.workDone === 100 ? 50 : item.workDone })}
-                className="h-3.5 w-3.5 accent-[#00B050]"
-              />
-              Mark task completed
-            </label>
-          </td>
-          <td className="px-3 py-2 border border-white align-top">
-            <span className="inline-block px-1.5 py-0.5 bg-[#00B050] text-sm text-black whitespace-nowrap">
-              {formatBoardDate(item.date)}
-            </span>
-          </td>
-          <td className="px-2 py-2 border border-white text-center align-top">
-            <button
-              type="button"
-              onClick={() => updateBoardItem(item.boardId, isFlagged
-                ? { flagged: false, flagComment: '', concernedPersonId: '', concernedPersonName: '' }
-                : { flagged: true })}
-              className={`px-2 py-0.5 text-[10px] font-semibold text-white border transition cursor-pointer ${
-                isFlagged
-                  ? 'bg-[#C55A11] border-red-700 ring-2 ring-red-500'
-                  : 'bg-[#ED7D31] border-[#4472C4] hover:bg-[#C55A11]'
-              }`}
-              title={isFlagged ? 'Remove flag' : 'Flag this task'}
-              aria-pressed={isFlagged}
-            >
-              Flag
-            </button>
-          </td>
-          <td className="px-3 py-2 border border-white text-center align-top">
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="Hours"
-              value={item.hoursInput !== undefined ? item.hoursInput : (item.hours ? hoursToHHMM(item.hours) : '')}
-              onChange={(e) => {
-                const val = e.target.value;
-                const parsed = parseTimeInput(val);
-                updateBoardItem(item.boardId, {
-                  hours: parsed.ok ? parsed.hours : 0,
-                  hoursInput: val
-                });
-              }}
-              className={`w-20 px-1.5 py-1 text-sm font-bold text-center text-black placeholder:text-black/60 border focus:outline-none focus:ring-2 ${
-                errs?.hours
-                  ? 'bg-rose-100 border-rose-500 focus:ring-rose-500'
-                  : 'bg-[#00B050] border-[#00B050] focus:ring-emerald-900'
-              }`}
-            />
-            {errs?.hours && (
-              <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.hours}</p>
-            )}
-          </td>
-        </tr>
-      );
-    }
-
-    return rows;
   };
 
   return (
@@ -1490,7 +1791,8 @@ const EmployeeDashboard: React.FC = () => {
 
             {/* Task categories */}
             <div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+              <div className="overflow-x-auto">
+              <div className="grid grid-cols-5 min-w-[640px]">
                 {CATEGORIES.map((cat) => {
                   const isActive = activeCategory === cat.id;
 
@@ -1498,30 +1800,17 @@ const EmployeeDashboard: React.FC = () => {
                     <button
                       key={cat.id}
                       onClick={() => setActiveCategory(cat.id)}
-                      style={{
-                        backgroundColor: cat.bgColor,
-                        color: cat.textColor
-                      }}
-                      className={`h-[54px] px-5 rounded-xl font-semibold text-[15px] shadow-xs transition-all duration-200 flex items-center justify-center gap-2.5 relative overflow-hidden group cursor-pointer ${
-                        isActive
-                          ? 'ring-4 ring-offset-2 ring-slate-900/20 scale-[1.02] shadow-md border-2 border-white'
-                          : 'hover:brightness-90 opacity-95 hover:opacity-100'
+                      aria-pressed={isActive}
+                      className={`h-11 px-4 border border-white text-[15px] font-bold text-black transition flex items-center justify-center gap-2 cursor-pointer ${
+                        isActive ? 'bg-[#C55A11] text-white shadow-inner' : 'bg-[#ED7D31] hover:bg-[#D9682A]'
                       }`}
                     >
-                      <span className="flex items-center justify-center">
-                        {cat.id === 'URGENT' && <AlertTriangle size={18} className="text-white" />}
-                        {cat.id === 'LESS_URGENT' && <Clock size={18} className="text-white" />}
-                        {cat.id === 'LOW_URGENT' && <Sparkles size={18} className="text-white" />}
-                        {cat.id === 'SELF_DEFINED' && <Edit3 size={18} className="text-white" />}
-                        {cat.id === 'DAILY_TASK' && <CalendarCheck size={18} className="text-white" />}
-                      </span>
-                      <span className="truncate tracking-wide font-semibold">{cat.label}</span>
-                      {isActive && (
-                        <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-                      )}
+                      <span className="text-[10px]">❖</span>
+                      <span className="truncate">{cat.label}</span>
                     </button>
                   );
                 })}
+              </div>
               </div>
             </div>
 
@@ -1571,7 +1860,7 @@ const EmployeeDashboard: React.FC = () => {
                         activeCategory === 'LOW_URGENT' ? 'Low Urgent Tasks' :
                         activeCategory === 'SELF_DEFINED' ? 'Self Defined Tasks' :
                         'Daily Tasks'
-                      } ({combinedCategoryTasks.length})
+                      } ({categoryTaskRows.length})
                     </span>
                   </div>
                 </div>
@@ -1602,7 +1891,7 @@ const EmployeeDashboard: React.FC = () => {
                       Retry
                     </button>
                   </div>
-                ) : combinedCategoryTasks.length === 0 ? (
+                ) : categoryTaskRows.length === 0 ? (
                   /* EMPTY STATE */
                   <div className="py-12 text-center space-y-3">
                     <ListTodo className="w-12 h-12 text-slate-300 mx-auto" />
@@ -1631,67 +1920,65 @@ const EmployeeDashboard: React.FC = () => {
                 ) : (
                   /* EXACT 4-COLUMN TABLE */
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[700px]">
+                    <table className="w-full table-fixed text-left border-collapse min-w-[700px]">
+                      <colgroup>
+                        <col className="w-[23%]" />
+                        <col className="w-[23%]" />
+                        <col className="w-[27%]" />
+                        <col className="w-[27%]" />
+                      </colgroup>
                       <thead>
-                        <tr className="bg-[#F8FAFC] text-[#0F172A] text-xs font-extrabold uppercase tracking-wider border-b border-[#E2E8F0]">
-                          <th className="py-3.5 px-4 w-[40%]">Project / Task</th>
-                          <th className="py-3.5 px-4 w-[38%]">Description</th>
-                          <th className="py-3.5 px-4 w-[22%] text-center">Action</th>
+                        <tr className="bg-[#4472C4] text-white">
+                          <th className="px-3 py-4 text-center text-base font-bold border border-white">Project</th>
+                          <th className="px-3 py-4 text-center text-base font-bold border border-white">Task</th>
+                          <th className="px-3 py-4 text-center text-base font-bold border border-white">Description</th>
+                          <th className="px-3 py-4 text-center text-base font-bold border border-white">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#E2E8F0] text-sm text-[#0F172A]">
-                        {groupedCategoryTasks.map(group => (
-                          <React.Fragment key={`category-group-${group.projectId}`}>
-                          <tr className="bg-[#F1F5F9]">
-                            <td colSpan={3} className="py-2.5 px-4 font-bold text-[#0F172A]">
-                              {group.projectName}
+                      <tbody className="text-[15px] text-black">
+                        {categoryTaskRows.map((row, index) => {
+                          const isAdded = row.addables.every(isTaskOnBoardOrSubmitted);
+                          const ownDescription = row.description.trim();
+                          return (
+                            <tr key={row.key} className={index % 2 === 0 ? 'bg-[#CFD5EA]' : 'bg-[#E9EBF5]'}>
+                              <td className="px-3 py-2 align-top font-bold break-words border border-white">
+                                {row.projectName}
+                              </td>
+                              <td className="px-3 py-2 align-top font-bold break-words border border-white">
+                                {row.title}
+                              </td>
+                              <td className="px-3 py-2 align-top break-words border border-white">
+                                {row.subtasks.length > 0 ? (
+                                  <ul className="text-[13px] leading-snug">
+                                    {row.subtasks.map(sub => (
+                                      <li key={taskIdOf(sub)}>- {cleanTaskTitle(sub.title)}</li>
+                                    ))}
+                                  </ul>
+                                ) : ownDescription && cleanTaskTitle(ownDescription) !== row.title ? (
+                                  renderDescription(ownDescription)
+                                ) : (
+                                  <span className="text-[13px] text-slate-500">-</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 align-top border border-white">
+                                {isAdded ? (
+                                  <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
+                                    <Check size={15} />
+                                    Added to Daily entry Chart
+                                  </span>
+                                ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => handleAddTaskRowToDailyBoard(row)}
+                                    className="text-left font-medium text-[#FF0000] hover:underline cursor-pointer"
+                                  >
+                                    Add to Daily entry Chart
+                                </button>
+                              )}
                             </td>
                           </tr>
-                          {group.items.map(t => {
-                          const isAdded = dailyBoard.some(b => b.taskId === t.id) ||
-                            dailyHistory.some(entry => entry.taskId === t.id && entry.date === todayDateStr);
-
-                          return (
-                            <tr key={t.id} className="hover:bg-[#F8FAFC] transition-colors">
-                              {/* TASK */}
-                              <td className="py-3 pl-8 pr-4 font-semibold align-top text-[#0F172A] break-words">
-                                <span className="text-slate-400 mr-1.5">-</span>{t.title}
-                              </td>
-
-                              {/* DESCRIPTION */}
-                              <td className="py-3 px-4 align-top break-words">
-                                {renderDescription(t.description)}
-                              </td>
-
-                              {/* ACTION */}
-                              <td className="py-3 px-4 text-center align-top">
-                                <button
-                                  disabled={isAdded}
-                                  onClick={() => handleAddCategoryTaskToDailyBoard(t)}
-                                  className={`w-full py-2.5 px-3 rounded-[10px] text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                                    isAdded
-                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-not-allowed'
-                                      : 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-xs'
-                                  }`}
-                                >
-                                  {isAdded ? (
-                                    <>
-                                      <Check size={14} />
-                                      <span>✓ Added</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Plus size={14} />
-                                      <span>Add to Daily Entry</span>
-                                    </>
-                                  )}
-                                </button>
-                              </td>
-                            </tr>
                           );
-                          })}
-                          </React.Fragment>
-                        ))}
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1712,17 +1999,16 @@ const EmployeeDashboard: React.FC = () => {
                 <h2 className="text-xl font-bold text-[#E00000]">Employee Dashboard</h2>
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
+                    type="button"
                     onClick={() => {
-                      setDailyWorkError('');
-                      if (projects.length > 0) {
-                        setDailyWorkProjectId(projects[0].id || projects[0]._id || '');
-                      }
-                      setIsDailyWorkModalOpen(true);
+                      setSubmittedWorkProjectFilter('ALL');
+                      setSubmittedWorkTaskFilter('ALL');
+                      setIsSubmittedWorkOpen(true);
                     }}
                     className="px-3 py-2 bg-white hover:bg-slate-50 text-[#4472C4] border border-[#4472C4] text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Plus size={14} />
-                    <span>Add Daily Work</span>
+                    <History size={14} />
+                    <span>Submitted Work</span>
                   </button>
                   <button
                     disabled={submitting}
@@ -1735,7 +2021,7 @@ const EmployeeDashboard: React.FC = () => {
                   >
                     {submitting ? 'Submitting...' : 'Submit'}
                   </button>
-                </div>
+                  </div>
               </div>
 
               {/* Global Error Banner */}
@@ -1752,22 +2038,21 @@ const EmployeeDashboard: React.FC = () => {
                   <ListTodo size={42} className="mx-auto text-slate-300 mb-3" />
                   <h3 className="text-base font-bold text-slate-800">No tasks added to today&apos;s Daily Entry.</h3>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                    Assigned project tasks appear here automatically. Use Add Daily Work to add other work.
+                    Assigned project tasks appear here automatically.
                   </p>
                 </div>
               ) : (
                 <div className="w-full max-w-full overflow-x-auto">
                   <table className="w-full min-w-[860px] table-fixed text-left border-collapse">
                     <colgroup>
-                      <col className="w-[28%]" />
+                      <col className="w-[27%]" />
                       <col className="w-[30%]" />
-                      <col className="w-[15%]" />
-                      <col className="w-[7%]" />
-                      <col className="w-[20%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[27%]" />
                     </colgroup>
                     <thead>
                       <tr className="bg-[#4472C4] text-white">
-                        <th colSpan={4} className="px-3 py-2 text-center text-base font-bold border border-white">
+                        <th colSpan={3} className="px-3 py-2 text-center text-base font-bold border border-white">
                           Daily Entry Task Board
                         </th>
                         <th className="px-3 py-1.5 text-center font-bold border border-white">
@@ -1779,27 +2064,18 @@ const EmployeeDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {boardBlockGroups.map(group => (
-                        <React.Fragment key={`board-project-${group.projectId}`}>
-                          <tr className="bg-[#B4C6E7]">
-                            <td colSpan={5} className="px-3 py-1.5 text-[15px] font-bold text-black border border-white">
-                              {group.projectName}
-                            </td>
-                          </tr>
-                          {group.items.map(block => (
-                            <React.Fragment key={block.key}>
-                              {renderBoardBlock(block)}
-                            </React.Fragment>
-                          ))}
+                      {boardTaskGroups.map(taskGroup => (
+                        <React.Fragment key={`board-task-${taskGroup.key}`}>
+                          {renderBoardTaskGroup(taskGroup)}
                         </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
               )}
             </div>
 
-          </div>
+                </div>
         )}
 
         {/* TAB 3: MY TASKS OVERVIEW */}
@@ -1815,12 +2091,12 @@ const EmployeeDashboard: React.FC = () => {
             <div className="space-y-6">
               {groupedEmployeeTasks.map(group => (
                 <div key={group.projectId} className="space-y-2">
-                  <h4 className="text-sm font-bold text-[#172554]">{group.projectName}</h4>
+                  <h4 className="text-sm font-bold text-[#172554]">{projectHeading(group)}</h4>
                   <ul className="space-y-1">
                     {group.items.map(t => (
-                      <li key={t.id || t._id} className="flex items-start gap-2 text-sm text-slate-800">
+                      <li key={t.id || t._id} className={`flex items-start gap-2 text-sm text-slate-800 ${t.parentTaskId ? 'pl-6' : ''}`}>
                         <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#2563EB] flex-shrink-0" />
-                        <span className="flex-1">{t.title}</span>
+                        <span className="flex-1"><CodeBadge code={t.taskCode} />{t.title}</span>
                         <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-slate-100 text-slate-700">{t.status}</span>
                       </li>
                     ))}
@@ -1902,7 +2178,7 @@ const EmployeeDashboard: React.FC = () => {
                       <tr key={entry.id || entry._id} className="hover:bg-slate-50 transition">
                         <td className="py-3 px-4 font-bold text-slate-900">{entry.date}</td>
                         <td className="py-3 px-4 font-semibold text-slate-700">{entry.projectName}</td>
-                        <td className="py-3 px-4 font-bold text-slate-900">{entry.taskTitle}</td>
+                        <td className="py-3 px-4 font-bold text-slate-900"><CodeBadge code={taskCodeOf(entry.taskId)} />{entry.taskTitle}</td>
                         <td className="py-3 px-4 text-slate-600">{entry.actionTaken}</td>
                         <td className="py-3 px-4 font-black text-indigo-600">{formatHoursMinutes(entry.hours)}</td>
                         <td className="py-3 px-4">
@@ -1933,8 +2209,8 @@ const EmployeeDashboard: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-200 gap-4">
               <div>
-                <h3 className="text-lg font-black text-[#172554]">Completed History Archive</h3>
-                <p className="text-xs text-slate-500">Submitted daily entry history records and finished tasks</p>
+                <h3 className="text-lg font-black text-[#172554]">Completed Task History</h3>
+                <p className="text-xs text-slate-500">View only — submitted daily entry history and finished tasks</p>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1961,11 +2237,45 @@ const EmployeeDashboard: React.FC = () => {
               </div>
             </div>
 
+            <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
+              <select
+                aria-label="Filter completed history by project"
+                value={completedHistoryProjectFilter}
+                onChange={(event) => setCompletedHistoryProjectFilter(event.target.value)}
+                className="min-w-[200px] flex-1 rounded-xl border border-blue-300 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-900 shadow-sm transition hover:bg-blue-100 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="ALL">Project: All</option>
+                {Array.from(completedHistoryProjectOptions, ([id, name]) => (
+                  <option key={id} value={id}>Project: {name}</option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter completed history by employee"
+                value={completedHistoryEmployeeFilter}
+                onChange={(event) => setCompletedHistoryEmployeeFilter(event.target.value)}
+                className="min-w-[200px] flex-1 rounded-xl border border-indigo-300 bg-indigo-50 px-3.5 py-2 text-xs font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              >
+                <option value="ALL">Employee: All</option>
+                <option value="ME">Employee: {user?.name || 'Me'}</option>
+              </select>
+              <select
+                aria-label="Filter completed history by time"
+                value={completedHistoryTimeFilter}
+                onChange={(event) => setCompletedHistoryTimeFilter(event.target.value as 'all' | 'date' | 'week' | 'month')}
+                className="min-w-[200px] flex-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-100 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+              >
+                <option value="all">Time: All</option>
+                <option value="date">Time: Today</option>
+                <option value="week">Time: Week</option>
+                <option value="month">Time: Month</option>
+              </select>
+            </div>
+
             {completedHistorySubTab === 'daily' && (
-              dailyHistory.length === 0 ? (
+              filteredCompletedDailyHistory.length === 0 ? (
                 <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <CheckCircle2 size={36} className="mx-auto text-slate-300 mb-2" />
-                  <p className="text-sm font-bold text-slate-700">No daily entry history available.</p>
+                  <p className="text-sm font-bold text-slate-700">No daily entry history matches these filters.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1984,11 +2294,11 @@ const EmployeeDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {dailyHistory.map((entry, index) => (
+                      {filteredCompletedDailyHistory.map((entry, index) => (
                         <tr key={entry.id || entry._id || `comp-dh-${index}`} className="hover:bg-slate-50 transition">
                           <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{entry.date}</td>
                           <td className="py-3 px-4 font-semibold text-slate-700">{entry.projectName}</td>
-                          <td className="py-3 px-4 font-bold text-slate-900">{entry.taskTitle}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900"><CodeBadge code={taskCodeOf(entry.taskId)} />{entry.taskTitle}</td>
                           <td className="py-3 px-4 text-slate-600 max-w-xs">{entry.details || '—'}</td>
                           <td className="py-3 px-4 text-slate-600 max-w-xs">{entry.actionTaken}</td>
                           <td className="py-3 px-4 text-center font-black text-indigo-600 whitespace-nowrap">{formatHoursMinutes(entry.hours)}</td>
@@ -2018,7 +2328,7 @@ const EmployeeDashboard: React.FC = () => {
             )}
 
             {completedHistorySubTab === 'tasks' && (
-              tasks.filter(t => t.status === 'Completed').length === 0 ? (
+              filteredCompletedTasks.length === 0 ? (
                 <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <CheckCircle2 size={36} className="mx-auto text-slate-300 mb-2" />
                   <p className="text-sm font-bold text-slate-700">No completed task history available.</p>
@@ -2040,13 +2350,11 @@ const EmployeeDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 font-medium">
-                      {tasks
-                        .filter(t => t.status === 'Completed')
-                        .map(t => {
+                      {filteredCompletedTasks.map(t => {
                           const taskIdStr = t.id || t._id;
-                          const taskEntries = dailyHistory.filter(e => e.taskId === taskIdStr);
+                          const taskEntries = filteredCompletedDailyHistory.filter(e => e.taskId === taskIdStr);
                           const hoursWorked = taskEntries.reduce((acc, e) => acc + (Number(e.hours) || 0), 0);
-                          const actionTaken = taskEntries.length > 0 ? taskEntries[0].actionTaken : (t.description || '-');
+                          const actionTaken = taskEntries.length > 0 ? (taskEntries[0].actionTaken || '—') : '—';
                           const compDate = t.approvalDate
                             ? new Date(t.approvalDate).toLocaleDateString('en-IN')
                             : (t.updatedAt ? new Date(t.updatedAt).toLocaleDateString('en-IN') : todayDateStr);
@@ -2054,7 +2362,7 @@ const EmployeeDashboard: React.FC = () => {
                           return (
                             <tr key={taskIdStr} className="hover:bg-slate-50 transition">
                               <td className="py-3.5 px-4 font-bold text-slate-900">{t.projectName}</td>
-                              <td className="py-3.5 px-4 font-bold text-indigo-700">{t.title}</td>
+                              <td className="py-3.5 px-4 font-bold text-indigo-700"><CodeBadge code={t.taskCode} />{t.title}</td>
                               <td className="py-3.5 px-4 text-slate-600">{user?.name}</td>
                               <td className="py-3.5 px-4 text-slate-600">{compDate}</td>
                               <td className="py-3.5 px-4 text-center">
@@ -2143,19 +2451,19 @@ const EmployeeDashboard: React.FC = () => {
                   const isClosed = r.status === 'Closed' || r.status === 'Completed';
                   return (
                     <div key={remId} className="p-4 border border-slate-200 bg-slate-50/70 rounded-xl text-xs space-y-2 hover:border-slate-300 transition">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-slate-900 text-sm">{r.taskTitle}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] text-slate-500 font-semibold">{r.reminderDate}</span>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-slate-900 text-sm">{r.taskTitle}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500 font-semibold">{r.reminderDate}</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                             isClosed ? 'bg-emerald-100 text-emerald-800' :
                             r.status === 'Replied' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
+                        }`}>
                             {isClosed ? 'Closed' : r.status}
-                          </span>
-                        </div>
+                        </span>
                       </div>
-                      {r.message && <p className="text-slate-600 font-medium">{r.message}</p>}
+                    </div>
+                    {r.message && <p className="text-slate-600 font-medium">{r.message}</p>}
                       {r.response && <p className="text-slate-700 italic">Follow-up: {r.response}</p>}
                       {!isClosed && (
                         <div className="flex flex-col sm:flex-row gap-2 pt-1">
@@ -2178,7 +2486,7 @@ const EmployeeDashboard: React.FC = () => {
                           >
                             Mark Closed
                           </button>
-                        </div>
+                  </div>
                       )}
                     </div>
                   );
@@ -2190,199 +2498,63 @@ const EmployeeDashboard: React.FC = () => {
 
         {/* TAB 7: MY PERFORMANCE */}
         {activeTab === 'performance' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-slate-200 gap-4">
-              <div>
-                <h3 className="text-lg font-black text-[#172554]">MY PERFORMANCE</h3>
-                <p className="text-xs text-slate-500">View actual Daily Entry performance by day, week, month, or custom date range</p>
-              </div>
+          <section className="space-y-5" aria-labelledby="employee-performance-title">
+            <h2 id="employee-performance-title" className="text-xl font-bold text-[#172554] md:text-[22px]">
+              Performance
+            </h2>
 
-              {/* Calendar Date Range Selector & View Toggles */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 p-1.5 rounded-xl text-xs">
-                  <Calendar size={15} className="text-blue-600 flex-shrink-0 ml-1" />
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">From:</label>
-                    <input
-                      type="date"
-                      value={perfStartDate}
-                      onChange={(e) => applyPerfView('custom', e.target.value, perfEndDate)}
-                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">To:</label>
-                    <input
-                      type="date"
-                      value={perfEndDate}
-                      onChange={(e) => applyPerfView('custom', perfStartDate, e.target.value)}
-                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {[
+                { label: 'Tasks done', value: weeklyPerformanceRows.reduce((total, week) => total + week.tasksDone, 0) },
+                { label: 'Hours logged', value: formatPerformanceHours(weeklyPerformanceRows.reduce((total, week) => total + week.hoursLogged, 0)) },
+                { label: 'Latest marks', value: latestPerformanceMark === null ? '— / 10' : `${formatPerformanceMark(latestPerformanceMark * 2)} / 10` }
+              ].map(card => (
+                <div
+                  key={card.label}
+                  className="flex min-h-[90px] items-center justify-center rounded-lg border border-[#D9E2EF] bg-white px-5 py-6 text-center"
+                >
+                  <p className="text-lg font-semibold text-[#1E293B]">
+                    {card.label}: <span className="font-bold">{card.value}</span>
+                  </p>
                 </div>
-
-                <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-                  <button
-                    onClick={() => {
-                      const day = perfEndDate || todayDateStr;
-                      applyPerfView('daily', day, day);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                      perfTab === 'daily'
-                        ? 'bg-[#2563EB] text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Daily
-                  </button>
-                  <button
-                    onClick={() => {
-                      const week = getWeekBounds(perfEndDate || todayDateStr);
-                      applyPerfView('weekly', week.start, week.end);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                      perfTab === 'weekly'
-                        ? 'bg-[#2563EB] text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Weekly
-                  </button>
-                  <button
-                    onClick={() => {
-                      const month = getMonthBounds(perfEndDate || todayDateStr);
-                      applyPerfView('monthly', month.start, month.end);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                      perfTab === 'monthly'
-                        ? 'bg-[#2563EB] text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Monthly
-                  </button>
-                  <button
-                    onClick={() => applyPerfView('custom', perfStartDate, perfEndDate)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                      perfTab === 'custom'
-                        ? 'bg-[#2563EB] text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Custom
-                  </button>
-                </div>
-              </div>
+              ))}
             </div>
 
-            {/* Selected Date Range Display Badge */}
-            <div className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 inline-flex items-center gap-2">
-              <Calendar size={14} className="text-indigo-600" />
-              <span>Viewing Performance Period: <span className="font-extrabold text-indigo-950">{selectedPeriodLabel}</span></span>
-            </div>
-
-            {/* Performance Cards */}
-            <div className="space-y-4">
-              <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">{selectedPeriodHeading}</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-1">
-                  <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Work Done</p>
-                  <p className="text-2xl font-black text-blue-950">
-                    {selectedPerfMetrics?.taskCount ?? selectedPerfMetrics?.workDone ?? 0}
-                  </p>
-                  <p className="text-[11px] text-blue-600 font-medium">
-                    {(selectedPerfMetrics?.taskCount ?? 0)} Tasks
-                  </p>
-                </div>
-
-                <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-1">
-                  <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Time Spent (Work Hours)</p>
-                  <p className="text-lg font-black text-emerald-950">
-                    {formatHoursMinutes(selectedPerfMetrics?.workHours ?? 0)}
-                  </p>
-                  <p className="text-[11px] text-emerald-600 font-medium">Calculated from daily entries</p>
-                </div>
-
-                <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-2xl space-y-1">
-                  <p className="text-xs font-bold text-purple-700 uppercase tracking-wider">Free Time</p>
-                  <p className="text-lg font-black text-purple-950">
-                    {formatHoursMinutes(selectedPerfMetrics?.freeHours ?? 0)}
-                  </p>
-                  <p className="text-[11px] text-purple-600 font-medium">8 hours minus actual work hours on working days</p>
-                </div>
-
-                <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl space-y-1">
-                  <p className="text-xs font-bold text-amber-700 uppercase tracking-wider">Marking</p>
-                  <p className="text-2xl font-black text-amber-950">
-                    {renderDirectorMarking(selectedPerfMetrics?.marking)}
-                  </p>
-                  <p className="text-[11px] text-amber-600 font-medium">Exact Director rating (Read-only)</p>
-                </div>
-              </div>
-            </div>
-
-            <section className="space-y-3 pt-2">
-              <div>
-                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Day-Wise Performance</h4>
-                <p className="text-xs text-slate-500 mt-1">Daily work, hours, free time, and Director marking for the selected period.</p>
-              </div>
-              <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                <table className="w-full text-left border-collapse min-w-[720px]">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-700 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
-                      <th className="py-3 px-4">Date</th>
-                      <th className="py-3 px-4">Work Done / Tasks</th>
-                      <th className="py-3 px-4 text-right">Work Hours</th>
-                      <th className="py-3 px-4 text-right">Free Time</th>
-                      <th className="py-3 px-4 text-right">Marking</th>
+            <div className="overflow-x-auto border border-[#D9E2EF] bg-white">
+              <table className="w-full min-w-[640px] border-collapse text-left text-sm text-[#172033]">
+                <thead>
+                  <tr className="bg-[#334155] text-white">
+                    <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Week</th>
+                    <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Tasks done</th>
+                    <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Hours</th>
+                    <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Marks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weeklyPerformanceRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-4 text-sm text-slate-500">
+                        No weekly performance data available yet.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 text-xs">
-                    {dayWiseRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-8 px-4 text-center text-slate-400 font-semibold">
-                          No performance data available for the selected period.
-                        </td>
-                      </tr>
-                    ) : (
-                      dayWiseRows.map(row => {
-                        const taskRows = getRowTaskMarkings(row);
-                        return (
-                        <tr key={row.date} className="hover:bg-slate-50">
-                          <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap align-top">
-                            {formatPerformanceDate(row.date)}
-                          </td>
-                          <td className="py-3 px-4 text-slate-700">
-                            <ul className="space-y-0.5">
-                              {taskRows.map((task, idx) => (
-                                <li key={`${row.date}-${task.title}-${idx}`}>{task.title}</li>
-                              ))}
-                            </ul>
-                          </td>
-                          <td className="py-3 px-4 text-right font-black text-emerald-800 whitespace-nowrap align-top">
-                            {formatHoursMinutes(row.workHours)}
-                          </td>
-                          <td className="py-3 px-4 text-right font-black text-purple-800 whitespace-nowrap align-top">
-                            {formatHoursMinutes(row.freeHours)}
-                          </td>
-                          <td className="py-3 px-4 text-right whitespace-nowrap align-top">
-                            <ul className="space-y-0.5">
-                              {taskRows.map((task, idx) => (
-                                <li key={`${row.date}-marking-${task.title}-${idx}`}>
-                                  {renderDirectorMarking(task.marking)}
-                                </li>
-                              ))}
-                            </ul>
-                          </td>
-                        </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </div>
+                  ) : weeklyPerformanceRows.map((week, index) => (
+                    <tr key={week.periodStart} className={index % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}>
+                      <td className="border border-[#E2E8F0] px-2.5 py-2.5">Week {index + 1}</td>
+                      <td className="border border-[#E2E8F0] px-2.5 py-2.5">{week.tasksDone}</td>
+                      <td className="border border-[#E2E8F0] px-2.5 py-2.5">{formatPerformanceHours(week.hoursLogged)}</td>
+                      <td className="border border-[#E2E8F0] px-2.5 py-2.5">
+                        {week.rating === null ? '—' : `${formatPerformanceMark(week.rating * 2)} / 10`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded-lg border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-sm text-[#1D4ED8]">
+              Employee can see only their own performance.
+            </div>
+          </section>
         )}
 
         {/* TAB 8: FLAGS */}
@@ -2451,7 +2623,6 @@ const EmployeeDashboard: React.FC = () => {
         {activeTab === 'profile' && <EmployeeProfile />}
         </div>
 
-        {/* Task Removal Confirmation Modal */}
         {removeTargetId && (
           <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4 border border-slate-200">
@@ -2475,6 +2646,102 @@ const EmployeeDashboard: React.FC = () => {
                 >
                   Remove
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isSubmittedWorkOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+            <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-bold text-[#0F172A]">
+                    <History size={20} className="text-[#2563EB]" />
+                    Submitted Work
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">Review submitted action taken by project and task.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSubmittedWorkOpen(false)}
+                  className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                  aria-label="Close submitted work"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-3 border-b border-slate-200 bg-slate-50 p-4">
+                <label className="min-w-[220px] flex-1 text-xs font-bold text-slate-600">
+                  Project
+                  <select
+                    value={submittedWorkProjectFilter}
+                    onChange={(event) => {
+                      setSubmittedWorkProjectFilter(event.target.value);
+                      setSubmittedWorkTaskFilter('ALL');
+                    }}
+                    className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+                  >
+                    <option value="ALL">All projects</option>
+                    {submittedWorkProjectOptions.map(project => (
+                      <option key={project.id} value={project.id}>{project.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="min-w-[220px] flex-1 text-xs font-bold text-slate-600">
+                  Task
+                  <select
+                    value={submittedWorkTaskFilter}
+                    onChange={(event) => setSubmittedWorkTaskFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+                  >
+                    <option value="ALL">All tasks</option>
+                    {submittedWorkTaskOptions.map(task => (
+                      <option key={task.key} value={task.key}>
+                        {taskCodeOf(task.taskId) ? `${formatHierarchyCode(taskCodeOf(task.taskId))} ` : ''}{task.taskTitle}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="self-end pb-2 text-xs font-semibold text-slate-500">
+                  {filteredSubmittedWork.length} {filteredSubmittedWork.length === 1 ? 'submission' : 'submissions'}
+                </p>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto">
+                {filteredSubmittedWork.length === 0 ? (
+                  <div className="p-12 text-center text-sm font-medium text-slate-500">
+                    No submitted work matches these filters.
+                  </div>
+                ) : (
+                  <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+                    <thead className="sticky top-0 bg-[#1E3A8A] text-[11px] font-bold uppercase tracking-wide text-white">
+                      <tr>
+                        <th className="px-4 py-3">Project</th>
+                        <th className="px-4 py-3">Task</th>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Action Taken</th>
+                        <th className="px-4 py-3 text-center">Hours</th>
+                        <th className="px-4 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {filteredSubmittedWork.map((entry, index) => (
+                        <tr key={entry.id || entry._id || `${entry.taskId}-${entry.date}-${index}`} className="align-top hover:bg-slate-50">
+                          <td className="px-4 py-3 font-semibold text-slate-700">{entry.projectName || 'Project'}</td>
+                          <td className="px-4 py-3 font-bold text-slate-900">{entry.taskTitle}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatBoardDate(entry.date)}</td>
+                          <td className="whitespace-pre-wrap px-4 py-3 text-slate-800">{entry.actionTaken || '—'}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-bold text-blue-700">
+                            {formatHoursMinutes(Number(entry.hours) || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">{entry.status || 'Submitted'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           </div>

@@ -11,6 +11,58 @@ import Employee from '@/models/Employee'
 
 export const dynamic = 'force-dynamic'
 
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+const ALLOWED_ATTACHMENT_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain'])
+
+const validateAttachments = (value: unknown) => {
+  if (value === undefined) return { attachments: [] as Array<Record<string, unknown>> }
+  if (!Array.isArray(value) || value.length > 5) {
+    return { error: 'Attach up to 5 files to each daily comment.' }
+  }
+
+  let totalBytes = 0
+  const attachments: Array<Record<string, unknown>> = []
+  for (const item of value) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      typeof item.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,100}$/.test(item.id) ||
+      typeof item.fileName !== 'string' ||
+      item.fileName.trim().length === 0 ||
+      item.fileName.length > 200 ||
+      typeof item.fileType !== 'string' ||
+      !ALLOWED_ATTACHMENT_TYPES.has(item.fileType) ||
+      !Number.isInteger(item.fileSize) ||
+      item.fileSize <= 0 ||
+      typeof item.data !== 'string' ||
+      item.data.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(item.data)
+    ) {
+      return { error: 'One or more attachments are invalid. Use PNG, JPG, PDF, or TXT files.' }
+    }
+
+    const base64Padding = item.data.endsWith('==') ? 2 : item.data.endsWith('=') ? 1 : 0
+    const decodedBytes = Math.floor(item.data.length * 3 / 4) - base64Padding
+    if (decodedBytes !== item.fileSize) {
+      return { error: `Attachment "${item.fileName}" has invalid file data.` }
+    }
+    totalBytes += item.fileSize
+    if (totalBytes > MAX_ATTACHMENT_BYTES) {
+      return { error: 'Attachments must total 2 MB or less per daily comment.' }
+    }
+
+    attachments.push({
+      id: item.id,
+      fileName: item.fileName.trim(),
+      fileType: item.fileType,
+      fileSize: item.fileSize,
+      data: item.data
+    })
+  }
+  return { attachments }
+}
+
 export async function GET(req: Request) {
   try {
     const user = await getAuthUser(req)
@@ -52,7 +104,7 @@ export async function GET(req: Request) {
     if (projectId) query.projectId = projectId
     if (flagged === 'true') query.flagged = true
 
-    const entries = await DailyEntry.find(query).sort({ date: -1, createdAt: -1 }).lean()
+    const entries = await DailyEntry.find(query).select('-attachments.data').sort({ date: -1, createdAt: -1 }).lean()
     return NextResponse.json(entries)
   } catch (error: any) {
     console.error('DailyEntries GET error:', error)
@@ -137,6 +189,11 @@ export async function POST(req: Request) {
       if (!actionTakenStr) {
         return NextResponse.json({ error: 'Action Taken is required for all tasks' }, { status: 400 })
       }
+      const validatedAttachments = validateAttachments(item.attachments)
+      if (validatedAttachments.error) {
+        return NextResponse.json({ error: validatedAttachments.error }, { status: 400 })
+      }
+      item._validatedAttachments = validatedAttachments.attachments
       const parsedHours = parseTimeInput(item.hours ?? item.hoursDisplay)
       if (!parsedHours.ok) {
         return NextResponse.json({ error: parsedHours.error }, { status: 400 })
@@ -160,11 +217,6 @@ export async function POST(req: Request) {
     }).lean()
 
     if (user.role === 'Employee') {
-      const existingTaskIds = new Set(existingTodayEntries.map(entry => entry.taskId))
-      if (uniqueSubmittedTaskIds.some(taskId => existingTaskIds.has(taskId))) {
-        return NextResponse.json({ error: 'This task is already in your Daily Entry for today.' }, { status: 409 })
-      }
-
       const officeWorkEntries = entries.filter(item => item.taskId === 'OFFICE_WORK')
       const getOfficeWorkKey = (item: { projectId?: string; taskTitle?: string; title?: string }) =>
         `${item.projectId || 'OFFICE_PROJECT'}|${(item.taskTitle || item.title || '').trim().toLowerCase()}`
@@ -201,6 +253,7 @@ export async function POST(req: Request) {
         taskTitle: taskTitleStr,
         details: detailsStr,
         actionTaken: actionTakenStr,
+        attachments: item._validatedAttachments,
         date: todayDate,
         hours: Number(item._parsedHours ?? item.hours),
         flagged: Boolean(item.flagged),
@@ -349,7 +402,10 @@ export async function POST(req: Request) {
       totalHoursSubmitted: totalSubmittedHours,
       totalAllocatedToday: grandTotal,
       freeHoursRemaining: Math.max(0, 8 - grandTotal),
-      entries: createdEntries
+      entries: createdEntries.map(entry => ({
+        ...entry.toObject(),
+        attachments: (entry.attachments || []).map(({ data, ...attachment }) => attachment)
+      }))
     }, { status: 201 })
   } catch (error: any) {
     console.error('DailyEntries POST error:', error)

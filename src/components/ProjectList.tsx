@@ -1,11 +1,11 @@
 'use client'
 
 import React, { useState } from 'react';
-import { Edit, Eye, Trash2, Plus, Download } from 'lucide-react';
-import { Project, User, Employee } from '../types';
+import { Edit, Eye, Trash2, Plus, Download, ChevronDown } from 'lucide-react';
+import { Project, User, Employee, ProjectRemark, ProjectStatus } from '../types';
 import ProjectModal from './ProjectModal';
 import { useAuth } from '../contexts/AuthContext';
-import { ProjectStatusBadge } from './BadgeUtils';
+import { CodeBadge, ProjectStatusBadge } from './BadgeUtils';
 import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectListProps {
@@ -27,6 +27,13 @@ const PROJECT_STATUS_FILTER_OPTIONS = [
   { value: 'Completed', label: 'Completed' }
 ];
 
+const PROJECT_BOARD_STATUSES: { value: ProjectStatus; label: string }[] = [
+  { value: 'Ongoing', label: 'Ongoing' },
+  { value: 'Upcoming', label: 'Upcoming' },
+  { value: 'Sleeping (On Hold)', label: 'On Hold' },
+  { value: 'Completed', label: 'Completed' }
+];
+
 const ProjectList: React.FC<ProjectListProps> = ({
   projects,
   users,
@@ -41,6 +48,9 @@ const ProjectList: React.FC<ProjectListProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'view' | 'edit'>('create');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [pendingStatus, setPendingStatus] = useState<ProjectStatus>('Ongoing');
+  const [statusError, setStatusError] = useState('');
 
   const handleCreateProject = () => {
     setSelectedProject(null);
@@ -82,6 +92,213 @@ const ProjectList: React.FC<ProjectListProps> = ({
   const canCreateProject = user?.role === 'Director' || user?.role === 'Project Head';
   const canEditProject = user?.role === 'Director' || user?.role === 'Project Head';
   const canDeleteProject = user?.role === 'Director';
+  const isDirector = user?.role === 'Director';
+
+  const selectedBoardProject = projects.find(
+    project => String(project.id || project._id) === selectedProjectId
+  );
+  const visibleBoardProjects = projects.filter(project => {
+    if (!statusFilter || statusFilter === 'all') return true;
+    if (statusFilter === 'Ongoing') return normalizeProjectStatus(project.status) === 'Ongoing';
+    return normalizeProjectStatus(project.status) === statusFilter;
+  });
+
+  const handleBoardStatusSave = async () => {
+    if (!selectedBoardProject) return;
+    setStatusError('');
+    try {
+      await onProjectSave({ ...selectedBoardProject, status: pendingStatus });
+    } catch (error) {
+      setStatusError(error instanceof Error ? error.message : 'Failed to update project status.');
+    }
+  };
+
+  const formatLatestRemark = (project: Project) => {
+    const latestRemark = (project.projectRemarks || []).reduce<ProjectRemark | undefined>((latest, remark) => {
+      return !latest || remark.date >= latest.date ? remark : latest;
+    }, undefined);
+
+    if (!latestRemark) return '-';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(latestRemark.date)
+      ? new Date(`${latestRemark.date}T00:00:00.000Z`)
+      : new Date(latestRemark.date);
+    const formattedDate = Number.isNaN(date.getTime())
+      ? latestRemark.date
+      : new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(date);
+    return `${formattedDate}: ${latestRemark.remark}`;
+  };
+
+  if (isDirector) {
+    const projectCounts = PROJECT_BOARD_STATUSES.map(status => ({
+      ...status,
+      count: projects.filter(project => normalizeProjectStatus(project.status) === status.value).length
+    }));
+
+    return (
+      <>
+        <section className="space-y-4" aria-labelledby="director-project-board-title">
+          <div>
+            <h2 id="director-project-board-title" className="text-xl font-bold text-[#0F172A]">
+              Project Board
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {projectCounts.map((status) => {
+              const selected = statusFilter === status.value;
+              const colorClasses = status.value === 'Ongoing'
+                ? 'bg-[#159947] hover:bg-[#12833d]'
+                : status.value === 'Upcoming'
+                  ? 'bg-[#3478E5] hover:bg-[#2868ce]'
+                  : status.value === 'Sleeping (On Hold)'
+                    ? 'bg-[#F29A05] hover:bg-[#db8900]'
+                    : 'bg-[#64748B] hover:bg-[#526176]';
+
+              return (
+                <button
+                  key={status.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onStatusFilterChange?.(selected ? 'all' : status.value)}
+                  className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${colorClasses} ${selected ? 'ring-2 ring-slate-900 ring-offset-2' : ''}`}
+                >
+                  <span>{status.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="overflow-x-auto rounded-sm border border-[#E2E8F0] bg-white">
+            <table className="w-full min-w-[680px] border-collapse text-left text-sm">
+              <thead className="bg-[#334155] text-white">
+                <tr>
+                  <th scope="col" className="border-r border-slate-500 px-3 py-2 font-bold">Project</th>
+                  <th scope="col" className="border-r border-slate-500 px-3 py-2 font-bold">Location</th>
+                  <th scope="col" className="border-r border-slate-500 px-3 py-2 font-bold">Status</th>
+                  <th scope="col" className="px-3 py-2 font-bold">Latest remark</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleBoardProjects.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="h-40 px-4 text-center text-sm text-slate-400">
+                      {projects.length === 0 ? 'No projects found.' : 'No projects match this status.'}
+                    </td>
+                  </tr>
+                ) : visibleBoardProjects.map(project => {
+                  const id = String(project.id || project._id || '');
+                  const selected = selectedProjectId === id;
+                  const normalizedStatus = normalizeProjectStatus(project.status);
+
+                  return (
+                    <tr
+                      key={id || project.projectNumber}
+                      aria-selected={selected}
+                      onClick={() => {
+                        setSelectedProjectId(id);
+                        setPendingStatus(normalizedStatus);
+                        setStatusError('');
+                      }}
+                      className={`cursor-pointer border-t border-[#E2E8F0] transition-colors odd:bg-[#F8FAFC] hover:bg-blue-50 ${selected ? 'bg-blue-100 ring-1 ring-inset ring-blue-400' : ''}`}
+                    >
+                      <td className="border-r border-[#E2E8F0] px-3 py-2.5 font-medium text-[#1E293B]">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleEditProject(project);
+                          }}
+                          className="text-left hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:underline"
+                          title="Edit project"
+                        >
+                          {project.projectName || project.projectNumber}
+                        </button>
+                      </td>
+                      <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">{project.location || '-'}</td>
+                      <td className="border-r border-[#E2E8F0] px-2 py-1.5">
+                        <div className="relative">
+                          <select
+                            aria-label={`Status for ${project.projectName}`}
+                            value={selected ? pendingStatus : normalizedStatus}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => {
+                              setSelectedProjectId(id);
+                              setPendingStatus(event.target.value as ProjectStatus);
+                              setStatusError('');
+                            }}
+                            className="w-full appearance-none cursor-pointer rounded-md border border-transparent bg-transparent px-2 py-1.5 pr-7 text-[#1E293B] focus:border-blue-500 focus:outline-none"
+                          >
+                            {PROJECT_BOARD_STATUSES.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={15} aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-blue-700" />
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-[#1E293B]">{formatLatestRemark(project)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+            <button
+              type="button"
+              onClick={handleCreateProject}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#159947] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#12833d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2"
+            >
+              <Plus size={16} />
+              Add New Project
+            </button>
+            <button
+              type="button"
+              disabled={!selectedBoardProject}
+              onClick={() => {
+                if (!selectedBoardProject) return;
+                const projectName = selectedBoardProject.projectName || selectedBoardProject.projectNumber;
+                if (window.confirm(`Remove "${projectName}"? Its tasks and related records will also be deleted.`)) {
+                  handleDeleteProject(selectedProjectId);
+                }
+              }}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#DC2626] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#bd2020] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
+            >
+              <Trash2 size={16} />
+              Remove Project
+            </button>
+            <div className="flex min-h-10">
+              <button
+                type="button"
+                onClick={() => void handleBoardStatusSave()}
+                disabled={!selectedBoardProject || normalizeProjectStatus(selectedBoardProject.status) === pendingStatus}
+                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#475569] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#38465b] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600 focus-visible:ring-offset-2"
+              >
+                Change Status
+              </button>
+            </div>
+          </div>
+
+          {statusError && (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {statusError}
+            </p>
+          )}
+
+        </section>
+
+        <ProjectModal
+          project={modalMode === 'create' ? null : selectedProject}
+          isOpen={isModalOpen}
+          onClose={handleCloseModal}
+          onSave={handleProjectSave}
+          onDelete={canDeleteProject ? handleDeleteProject : undefined}
+          users={users}
+          onCommentAdded={onCommentAdded}
+        />
+      </>
+    );
+  }
 
   const getStatusColor = (status: Project['status']) => {
     switch (status) {
@@ -403,7 +620,16 @@ const ProjectList: React.FC<ProjectListProps> = ({
                       fontWeight: '500',
                       color: '#111827'
                     }}>
-                      {project.projectName || (project as any).name || '-'}
+                      <CodeBadge code={project.projectCode} />
+                      {(() => {
+                        const name = project.projectName || (project as any).name || '';
+                        const code = String(project.projectCode || '');
+                        if (!name) return code ? null : '-';
+                        if (code && name.replace(/[^a-z0-9]/gi, '').toLowerCase() === code.replace(/[^a-z0-9]/gi, '').toLowerCase()) {
+                          return null;
+                        }
+                        return name;
+                      })()}
                     </div>
                   </td>
                   {/* Project Number */}
@@ -553,7 +779,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                             transition: 'all 0.2s ease'
                           }}
                           onMouseOver={(e) => {
-                            e.currentTarget.style.color = '#b91c1c';
+                            e.currentTarget.style.color = '#922d2dff';
                             e.currentTarget.style.backgroundColor = '#fecaca';
                           }}
                           onMouseOut={(e) => {

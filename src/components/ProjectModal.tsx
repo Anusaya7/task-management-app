@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Project, ProjectRemark, ProjectStatus } from '../types';
-import { X, Save, Plus, Trash2, AlertCircle, Calendar } from 'lucide-react';
+import { X, Save, AlertCircle } from 'lucide-react';
 import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectModalProps {
@@ -85,26 +85,6 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   }, [isOpen, project?.id || (project as any)?._id]);
 
   if (!isOpen) return null;
-
-  const handleAddRemark = () => {
-    setRemarks(prev => [...prev, { date: todayKolkata(), remark: '' }]);
-  };
-
-  const handleRemoveRemark = (index: number) => {
-    setRemarks(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleRemarkDateChange = (index: number, date: string) => {
-    setRemarks(prev => prev.map((item, i) => (
-      i === index ? { ...item, date: date || todayKolkata() } : item
-    )));
-  };
-
-  const handleRemarkTextChange = (index: number, remark: string) => {
-    setRemarks(prev => prev.map((item, i) => (
-      i === index ? { ...item, remark } : item
-    )));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,75 +248,6 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
               />
             </div>
           )}
-
-          {/* 6. Date-wise Project Remarks Timeline */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              6. Project Remarks (Date-wise Timeline)
-              {remarks.length > 0 && (
-                <span className="ml-2 normal-case tracking-normal font-semibold text-blue-700">
-                  {remarks.length} added
-                </span>
-              )}
-            </label>
-
-            {remarks.length > 0 && (
-              <div className="mb-2 hidden sm:grid sm:grid-cols-[148px_minmax(0,1fr)_36px] sm:gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Date</span>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Remark/Task</span>
-                <span className="sr-only">Remove</span>
-              </div>
-            )}
-
-            {remarks.length > 0 && (
-              <div className="space-y-2 mb-3">
-                {remarks.map((r, idx) => (
-                  <div
-                    key={r._id || `remark-row-${idx}`}
-                    className="grid grid-cols-1 sm:grid-cols-[148px_minmax(0,1fr)_36px] gap-2 items-center"
-                  >
-                    <label className="relative block">
-                      <span className="sr-only">Date</span>
-                      <Calendar size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-blue-600" />
-                      <input
-                        type="date"
-                        value={toDateInputValue(r.date)}
-                        onChange={(e) => handleRemarkDateChange(idx, e.target.value)}
-                        className="w-full pl-8 pr-2 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </label>
-                    <input
-                      type="text"
-                      value={r.remark}
-                      onChange={(e) => handleRemarkTextChange(idx, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') e.preventDefault();
-                      }}
-                      placeholder="Add new date-wise remark..."
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveRemark(idx)}
-                      className="h-9 w-9 inline-flex items-center justify-center text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50"
-                      title="Delete remark"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={handleAddRemark}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg inline-flex items-center gap-1 shadow-xs"
-            >
-              <Plus size={14} />
-              Add Remark
-            </button>
-          </div>
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">

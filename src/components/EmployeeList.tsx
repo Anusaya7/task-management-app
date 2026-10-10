@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
-import { Edit, Eye, Trash2, Plus, Download, Users, Mail, Phone, Briefcase, Building2, User as UserIcon } from 'lucide-react';
+import { Edit, Eye, Trash2, Plus, Download, Users, Mail, Phone, Briefcase, Building2, User as UserIcon, ChevronDown } from 'lucide-react';
 import { Employee, Project, Task } from '../types';
 import EmployeeModal from './EmployeeModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,7 +10,7 @@ interface EmployeeListProps {
   employees: Employee[];
   projects?: Project[];
   tasks?: Task[];
-  onEmployeeSave: (employee: Employee, assignmentData?: any) => void;
+  onEmployeeSave: (employee: Employee, assignmentData?: any) => void | Promise<void>;
   onEmployeeDelete: (employeeId: string) => void;
 }
 
@@ -35,6 +35,9 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'view' | 'edit'>('create');
+  const [savingStatusEmployeeId, setSavingStatusEmployeeId] = useState<string | null>(null);
+  const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
+  const [directorStatusFilter, setDirectorStatusFilter] = useState<'Active' | 'Inactive' | 'all'>('all');
 
   const handleCreateEmployee = () => {
     setSelectedEmployee(null);
@@ -71,7 +74,28 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
       console.log('✅ EmployeeList: Modal closed');
     } catch (error: any) {
       console.error('❌ EmployeeList: Error saving employee:', error);
-      // Keep modal open if there's an error
+      throw error;
+    }
+  };
+
+  const handleStatusChange = async (employee: Employee, status: Employee['status']) => {
+    const employeeId = String(employee.id || employee._id || '');
+    if (!employeeId || savingStatusEmployeeId) return;
+
+    setSavingStatusEmployeeId(employeeId);
+    setStatusErrors(prev => {
+      const next = { ...prev };
+      delete next[employeeId];
+      return next;
+    });
+    try {
+      await onEmployeeSave({ ...employee, status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update employee status.';
+      console.error('Error updating employee status:', error);
+      setStatusErrors(prev => ({ ...prev, [employeeId]: message }));
+    } finally {
+      setSavingStatusEmployeeId(null);
     }
   };
 
@@ -83,6 +107,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
   const canCreateEmployee = user?.role === 'Director';
   const canEditEmployee = user?.role === 'Director';
   const canDeleteEmployee = user?.role === 'Director';
+  const directorEmployees = employees.filter(employee => {
+    if (directorStatusFilter === 'all') return true;
+    return String(employee.status || 'Active') === directorStatusFilter;
+  });
 
   const getStatusColor = (status: Employee['status']) => {
     switch (status) {
@@ -100,6 +128,123 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
       year: 'numeric'
     });
   };
+
+  if (canEditEmployee) {
+    const statusFilters = [
+      { value: 'Active', label: 'Active', className: 'bg-[#16A34A] hover:bg-[#13883f]' },
+      { value: 'Inactive', label: 'Inactive', className: 'bg-[#64748B] hover:bg-[#526176]' },
+      { value: 'all', label: 'All', className: 'bg-[#3B82F6] hover:bg-[#2563EB]' }
+    ] as const;
+
+    return (
+      <>
+        <section className="space-y-4 pt-11" aria-label="Director employee board">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-[9px]">
+            {statusFilters.map(filter => (
+              <button
+                key={filter.value}
+                type="button"
+                aria-pressed={directorStatusFilter === filter.value}
+                onClick={() => setDirectorStatusFilter(filter.value)}
+                className={`min-h-10 rounded-lg px-5 py-2 text-sm font-bold text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${filter.className} ${directorStatusFilter === filter.value ? 'ring-2 ring-slate-900/20 ring-offset-1' : ''}`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="overflow-x-auto border border-[#E2E8F0] bg-white">
+            <table className="w-full min-w-[680px] border-collapse text-left text-sm">
+              <thead className="bg-[#334155] text-white">
+                <tr>
+                  <th scope="col" className="border-r border-slate-500 px-2.5 py-2 font-bold">Name</th>
+                  <th scope="col" className="border-r border-slate-500 px-2.5 py-2 font-bold">Role</th>
+                  <th scope="col" className="border-r border-slate-500 px-2.5 py-2 font-bold">Email</th>
+                  <th scope="col" className="border-r border-slate-500 px-2.5 py-2 font-bold">Status</th>
+                  <th scope="col" className="px-2.5 py-2 font-bold">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {directorEmployees.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="h-36 px-4 text-center text-sm text-slate-400">
+                      {employees.length === 0 ? 'No employees found.' : `No ${directorStatusFilter.toLowerCase()} employees found.`}
+                    </td>
+                  </tr>
+                ) : directorEmployees.map((employee, index) => {
+                  const employeeId = String(employee.id || employee._id || '');
+                  const employeeName = `${employee.firstName} ${employee.lastName}`.trim();
+                  const status = employee.status || 'Active';
+
+                  return (
+                    <tr
+                      key={employeeId || employee.email}
+                      className={`border-t border-[#E2E8F0] ${index % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}`}
+                    >
+                      <td className="border-r border-[#E2E8F0] px-2.5 py-2.5 text-[#1E293B]">{employeeName}</td>
+                      <td className="border-r border-[#E2E8F0] px-2.5 py-2.5 text-[#1E293B]">
+                        {employee.role === 'Project Head' ? 'Project Co-ordinator' : employee.role}
+                      </td>
+                      <td className="border-r border-[#E2E8F0] px-2.5 py-2.5 text-[#1E293B]">{employee.email}</td>
+                      <td className="border-r border-[#E2E8F0] px-2 py-1.5">
+                        <div className="relative">
+                          <select
+                            aria-label={`Change status for ${employeeName}`}
+                            value={status}
+                            disabled={!employeeId || savingStatusEmployeeId !== null}
+                            onChange={event => void handleStatusChange(employee, event.target.value as Employee['status'])}
+                            className="w-full appearance-none cursor-pointer bg-transparent px-2 py-1.5 pr-7 text-[#1E293B] outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                            <option value="Absent">Absent</option>
+                          </select>
+                          <ChevronDown size={16} aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-blue-700" />
+                        </div>
+                        {statusErrors[employeeId] && (
+                          <p role="alert" className="mt-1 max-w-48 whitespace-normal text-xs text-red-700">
+                            {statusErrors[employeeId]}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-2.5 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleEditEmployee(employee)}
+                          className="font-medium text-[#1E293B] hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:underline"
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCreateEmployee}
+            className="inline-flex min-h-10 min-w-[217px] items-center justify-center gap-2 rounded-lg bg-[#16A34A] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#13883f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2"
+          >
+            <Plus size={16} />
+            Add Employee
+          </button>
+        </section>
+
+        <EmployeeModal
+          employee={modalMode === 'create' ? null : selectedEmployee}
+          isOpen={isModalOpen}
+          onClose={handleCloseModal}
+          onSave={handleEmployeeSave}
+          onDelete={canDeleteEmployee ? handleDeleteEmployee : undefined}
+          projects={projects}
+          tasks={tasks}
+        />
+      </>
+    );
+  }
 
   const exportEmployees = () => {
       const csvContent = [
@@ -537,25 +682,59 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                       padding: '20px 24px',
                       whiteSpace: 'nowrap'
                     }}>
-                      <span style={{
-                        padding: '8px 16px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        letterSpacing: '0.3px',
-                        textTransform: 'uppercase',
-                        borderRadius: '10px',
-                        backgroundColor: employee.status === 'Active' ? '#d1fae5' :
-                                        employee.status === 'Inactive' ? '#fee2e2' :
-                                        employee.status === 'Absent' ? '#fef3c7' : '#f3f4f6',
-                        color: employee.status === 'Active' ? '#065f46' :
-                               employee.status === 'Inactive' ? '#991b1b' :
-                               employee.status === 'Absent' ? '#92400e' : '#374151',
-                        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
-                      }}>
-                        {employee.status}
-                      </span>
+                      {canEditEmployee && (employee.id || (employee as any)._id) ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                          <select
+                            aria-label={`Change status for ${employee.firstName} ${employee.lastName}`}
+                            value={employee.status || 'Active'}
+                            disabled={savingStatusEmployeeId !== null}
+                            onChange={(event) => void handleStatusChange(employee, event.target.value as Employee['status'])}
+                            style={{
+                              minWidth: '110px',
+                              padding: '7px 28px 7px 10px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              letterSpacing: '0.3px',
+                              textTransform: 'uppercase',
+                              borderRadius: '10px',
+                              border: `1px solid ${employee.status === 'Inactive' ? '#fecaca' : employee.status === 'Absent' ? '#fde68a' : '#a7f3d0'}`,
+                              backgroundColor: employee.status === 'Inactive' ? '#fee2e2' : employee.status === 'Absent' ? '#fef3c7' : '#d1fae5',
+                              color: employee.status === 'Inactive' ? '#991b1b' : employee.status === 'Absent' ? '#92400e' : '#065f46',
+                              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                              cursor: savingStatusEmployeeId ? 'wait' : 'pointer'
+                            }}
+                          >
+                            {employee.status === 'Absent' && <option value="Absent">Absent</option>}
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                          </select>
+                          {statusErrors[String(employee.id || (employee as any)._id || '')] && (
+                            <span role="alert" style={{ maxWidth: '180px', whiteSpace: 'normal', color: '#b91c1c', fontSize: '11px' }}>
+                              {statusErrors[String(employee.id || (employee as any)._id || '')]}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{
+                          padding: '8px 16px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          letterSpacing: '0.3px',
+                          textTransform: 'uppercase',
+                          borderRadius: '10px',
+                          backgroundColor: employee.status === 'Active' ? '#d1fae5' :
+                                          employee.status === 'Inactive' ? '#fee2e2' :
+                                          employee.status === 'Absent' ? '#fef3c7' : '#f3f4f6',
+                          color: employee.status === 'Active' ? '#065f46' :
+                                 employee.status === 'Inactive' ? '#991b1b' :
+                                 employee.status === 'Absent' ? '#92400e' : '#374151',
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+                        }}>
+                          {employee.status}
+                        </span>
+                      )}
                     </td>
                     <td style={{
                       padding: '20px 24px',

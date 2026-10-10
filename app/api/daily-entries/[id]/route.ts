@@ -17,7 +17,7 @@ export async function GET(
     }
 
     await connectToDatabase()
-    const entry = await DailyEntry.findById(params.id).lean()
+    const entry = await DailyEntry.findById(params.id).select('-attachments.data').lean()
     if (!entry) {
       return NextResponse.json({ error: 'Daily entry not found' }, { status: 404 })
     }
@@ -74,7 +74,29 @@ export async function PUT(
 
     if (body.taskTitle !== undefined && body.taskTitle.trim() !== '') entry.taskTitle = body.taskTitle.trim()
     if (body.details !== undefined && body.details.trim() !== '') entry.details = body.details.trim()
-    if (body.actionTaken !== undefined) entry.actionTaken = body.actionTaken.trim()
+    if (body.actionTaken !== undefined) {
+      if (typeof body.actionTaken !== 'string' || !body.actionTaken.trim()) {
+        return NextResponse.json({ error: 'Action Taken cannot be empty.' }, { status: 400 })
+      }
+      const nextActionTaken = body.actionTaken.trim()
+      if (nextActionTaken !== entry.actionTaken) {
+        const editedAt = new Date()
+        entry.commentHistory = [
+          ...(entry.commentHistory || []),
+          {
+            previousContent: entry.actionTaken,
+            updatedContent: nextActionTaken,
+            editorId: user._id.toString(),
+            editorName: `${user.firstName} ${user.lastName}`.trim(),
+            editorRole: user.role,
+            editedAt
+          }
+        ]
+        entry.commentLastEditedByName = `${user.firstName} ${user.lastName}`.trim()
+        entry.commentLastEditedAt = editedAt
+      }
+      entry.actionTaken = nextActionTaken
+    }
     if (body.hours !== undefined) {
       const parsedHours = parseTimeInput(body.hours)
       if (!parsedHours.ok) {
@@ -98,6 +120,50 @@ export async function PUT(
     return NextResponse.json(entry)
   } catch (error: any) {
     return NextResponse.json({ error: 'Failed to update daily entry' }, { status: 500 })
+  }
+}
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const user = await getAuthUser(req)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (user.role !== 'Director' && user.role !== 'Project Head') {
+      return NextResponse.json({ error: 'Only management can review daily entries' }, { status: 403 })
+    }
+
+    await connectToDatabase()
+    const entry = await DailyEntry.findById(params.id)
+    if (!entry) {
+      return NextResponse.json({ error: 'Daily entry not found' }, { status: 404 })
+    }
+
+    if (user.role === 'Project Head') {
+      const allowedEmployees = user.assignedEmployees || []
+      const allowedProjects = user.assignedProjects || []
+      const isAllowed =
+        allowedEmployees.includes(entry.employeeId) ||
+        entry.employeeId === user._id.toString() ||
+        allowedProjects.includes(entry.projectId)
+      if (!isAllowed) {
+        return NextResponse.json({ error: 'Forbidden: Daily entry outside assigned scope' }, { status: 403 })
+      }
+    }
+
+    entry.reviewedById = user._id.toString()
+    entry.reviewedByName = `${user.firstName} ${user.lastName}`.trim()
+    entry.reviewedAt = new Date()
+    entry.updatedAt = new Date()
+    await entry.save()
+
+    return NextResponse.json(entry)
+  } catch (error) {
+    console.error('DailyEntry PATCH error:', error)
+    return NextResponse.json({ error: 'Failed to review daily entry' }, { status: 500 })
   }
 }
 

@@ -2,6 +2,16 @@
 
 import React from 'react';
 import { TaskPriority, ProjectStatus, EmployeeStatus } from '../types';
+import { formatHierarchyCode } from '@/lib/taskHierarchy';
+
+export const CodeBadge: React.FC<{ code?: string; className?: string }> = ({ code, className = '' }) => {
+  if (!code) return null;
+  return (
+    <span className={`mr-1.5 inline-flex flex-shrink-0 items-center rounded bg-indigo-100 px-1.5 py-0.5 align-middle text-[10px] font-extrabold tracking-wide text-indigo-700 ${className}`}>
+      {formatHierarchyCode(code)}
+    </span>
+  );
+};
 
 export const PriorityBadge: React.FC<{ priority: TaskPriority | string }> = ({ priority }) => {
   const p = (priority || 'Medium').toString().toUpperCase();
@@ -10,7 +20,7 @@ export const PriorityBadge: React.FC<{ priority: TaskPriority | string }> = ({ p
   if (p === 'URGENT') {
     bg = 'bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]';
   } else if (p === 'MEDIUM' || p === 'LESS URGENT' || p === 'LESS_URGENT') {
-    bg = 'bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]';
+    bg = 'bg-[#F8FAFC] text-[#334155] border-[#CBD5E1]';
   } else if (p === 'LOW' || p === 'LOW URGENT' || p === 'LOW_URGENT') {
     bg = 'bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0]';
   } else if (p === 'SELF' || p === 'SELF DEFINED' || p === 'SELF_DEFINED') {

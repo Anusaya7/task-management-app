@@ -108,17 +108,12 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ onSelectTask })
       {/* Bell Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 focus:outline-none"
+        className="relative flex items-center gap-1.5 rounded-lg p-2 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
         title="Notifications"
-        aria-label="Notifications"
+        aria-label={`Notifications (${unreadCount} unread)`}
       >
-        <Bell size={20} className="text-slate-300" />
-        <span className="hidden sm:inline text-xs font-semibold">Notifications</span>
-        {unreadCount > 0 && (
-          <span className="bg-rose-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">
-            {unreadCount}
-          </span>
-        )}
+        <Bell size={18} className="text-slate-500" />
+        <span className="hidden text-xs font-semibold sm:inline">Notifications ({unreadCount})</span>
       </button>
 
       {/* Dropdown Menu */}

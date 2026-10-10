@@ -37,6 +37,7 @@ export interface Project {
   _id?: string;
   projectName: string;
   projectNumber: string;
+  projectCode?: string;
   location?: string;
   description: string;
   contactDetails?: string;
@@ -123,6 +124,7 @@ export interface Task {
   dueDate?: string;
   parentTaskId?: string;
   parentTaskTitle?: string;
+  taskCode?: string;
   estimatedHours?: number;
   rating?: number; // Director only (1-5)
   privateComment?: string; // Director only
@@ -252,6 +254,13 @@ export interface EmployeePerformance {
   absentDays: number;
   flaggedTasksCount: number;
   directorRating?: number;
+  weeklyHistory?: Array<{
+    periodStart: string;
+    periodEnd: string;
+    tasksDone: number;
+    hoursLogged: number;
+    rating: number | null;
+  }>;
   weekly?: {
     workDone: number;
     taskCount: number;
@@ -282,6 +291,35 @@ export interface EmployeePerformance {
       marking: number | null;
     }>;
   };
+  yearly?: {
+    workDone: number;
+    taskCount: number;
+    workHours: number;
+    freeHours: number;
+    marking: number | null;
+    dayWise?: Array<{
+      date: string;
+      tasks: string[];
+      taskMarkings?: Array<{ title: string; marking: number | null }>;
+      workHours: number;
+      freeHours: number;
+      marking: number | null;
+    }>;
+  };
+  weeklyMark?: {
+    rating: number;
+    comment: string;
+    periodStart: string;
+    periodEnd: string;
+    projectId: string;
+  };
+  weeklyMarks?: Array<{
+    rating: number;
+    comment: string;
+    periodStart: string;
+    periodEnd: string;
+    projectId: string;
+  }>;
   custom?: {
     startDate?: string;
     endDate?: string;
@@ -314,6 +352,23 @@ export interface DashboardStats {
   absentEmployees: number;
 }
 
+export interface DailyEntryAttachment {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  data?: string;
+}
+
+export interface DailyEntryCommentEdit {
+  previousContent: string;
+  updatedContent: string;
+  editorId: string;
+  editorName: string;
+  editorRole: UserRole;
+  editedAt: string;
+}
+
 export interface DailyEntry {
   id?: string;
   _id?: string;
@@ -325,10 +380,17 @@ export interface DailyEntry {
   taskTitle: string;
   details?: string;
   actionTaken: string;
+  attachments?: DailyEntryAttachment[];
+  commentHistory?: DailyEntryCommentEdit[];
+  commentLastEditedByName?: string;
+  commentLastEditedAt?: string;
   date: string; // YYYY-MM-DD
   hours: number;
   flagged: boolean;
   flagComment?: string;
+  reviewedById?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
   status: 'Pending' | 'In Progress' | 'Completed' | 'Blocked' | 'Submitted';
   createdAt?: string;
   updatedAt?: string;
@@ -345,4 +407,3 @@ export interface IndependentWork {
   createdAt?: string;
   updatedAt?: string;
 }
-

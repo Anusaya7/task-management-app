@@ -7,6 +7,7 @@ import PrivateRating from '@/models/PrivateRating'
 import DailyEntry from '@/models/DailyEntry'
 import Flag from '@/models/Flag'
 import Reminder from '@/models/Reminder'
+import { ensureTaskCodes } from '@/lib/hierarchyCodes'
 import { getAuthUser } from '@/lib/auth'
 import { ensureAssigneeProgress, serializeTaskWithAssignees } from '@/lib/assigneeProgress'
 
@@ -90,6 +91,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     const previousTitle = task.title
     const previousProjectId = task.projectId
     const previousProjectName = task.projectName
+    const previousParentId = String(task.parentTaskId || '')
     if (body.title) task.title = String(body.title).trim()
     if (body.description !== undefined) task.description = String(body.description).trim() || task.title
     if (body.projectId) {
@@ -157,8 +159,23 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         task.parentTaskTitle = parentTask.title
       }
     }
+    const projectMoved = task.projectId !== previousProjectId
+    const parentMoved = String(task.parentTaskId || '') !== previousParentId
+    if (projectMoved || parentMoved) task.taskCode = undefined
     task.updatedAt = new Date()
     await task.save()
+
+    if (projectMoved || parentMoved) {
+      if (projectMoved) {
+        await Task.updateMany(
+          { parentTaskId: task._id.toString() },
+          { $set: { projectId: task.projectId, projectName: task.projectName }, $unset: { taskCode: '' } }
+        )
+      } else {
+        await Task.updateMany({ parentTaskId: task._id.toString() }, { $unset: { taskCode: '' } })
+      }
+      await ensureTaskCodes(Array.from(new Set([previousProjectId, task.projectId].filter(Boolean))))
+    }
 
     // Subtasks, daily entries, flags and reminders store a copy of the task/project name.
     const taskId = task._id.toString()
@@ -183,7 +200,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       ])
     }
 
-    return NextResponse.json(serializeTaskWithAssignees(task))
+    const savedTask = (await Task.findById(task._id)) || task
+    return NextResponse.json(serializeTaskWithAssignees(savedTask))
   } catch (error: any) {
     console.error('Task PUT API error:', error)
     return NextResponse.json({ error: 'Failed to update task' }, { status: 500 })

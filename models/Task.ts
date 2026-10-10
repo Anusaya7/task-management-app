@@ -35,6 +35,7 @@ export interface ITask extends Document {
   dueDate?: string
   parentTaskId?: string
   parentTaskTitle?: string
+  taskCode?: string
   estimatedHours?: number
   createdAt: Date
   updatedAt: Date
@@ -109,6 +110,7 @@ const taskSchema = new Schema<ITask>({
   dueDate: { type: String },
   parentTaskId: { type: String },
   parentTaskTitle: { type: String },
+  taskCode: { type: String },
   estimatedHours: { type: Number, min: 0 },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
