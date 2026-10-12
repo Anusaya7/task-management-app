@@ -36,6 +36,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'view' | 'edit'>('create');
   const [savingStatusEmployeeId, setSavingStatusEmployeeId] = useState<string | null>(null);
+  const [statusDrafts, setStatusDrafts] = useState<Record<string, Employee['status']>>({});
   const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
   const [directorStatusFilter, setDirectorStatusFilter] = useState<'Active' | 'Inactive' | 'all'>('all');
 
@@ -78,18 +79,31 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     }
   };
 
-  const handleStatusChange = async (employee: Employee, status: Employee['status']) => {
+  const handleStatusChange = (employee: Employee, status: Employee['status']) => {
     const employeeId = String(employee.id || employee._id || '');
-    if (!employeeId || savingStatusEmployeeId) return;
+    if (!employeeId) return;
 
-    setSavingStatusEmployeeId(employeeId);
+    setStatusDrafts(prev => ({ ...prev, [employeeId]: status }));
     setStatusErrors(prev => {
       const next = { ...prev };
       delete next[employeeId];
       return next;
     });
+  };
+
+  const handleStatusSave = async (employee: Employee) => {
+    const employeeId = String(employee.id || employee._id || '');
+    const status = statusDrafts[employeeId];
+    if (!employeeId || !status || savingStatusEmployeeId) return;
+
+    setSavingStatusEmployeeId(employeeId);
     try {
       await onEmployeeSave({ ...employee, status });
+      setStatusDrafts(prev => {
+        const next = { ...prev };
+        delete next[employeeId];
+        return next;
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to update employee status.';
       console.error('Error updating employee status:', error);
@@ -185,6 +199,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                   const employeeId = String(employee.id || employee._id || '');
                   const employeeName = `${employee.firstName} ${employee.lastName}`.trim();
                   const status = employee.status || 'Active';
+                  const selectedStatus = statusDrafts[employeeId] || status;
+                  const hasStatusChange = selectedStatus !== status;
 
                   return (
                     <tr
@@ -200,7 +216,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         <div className="relative">
                           <select
                             aria-label={`Change status for ${employeeName}`}
-                            value={status}
+                            value={selectedStatus}
                             disabled={!employeeId || savingStatusEmployeeId !== null}
                             onChange={event => void handleStatusChange(employee, event.target.value as Employee['status'])}
                             title={shouldPreventDirectorDeactivation(employee)
@@ -214,6 +230,16 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                           </select>
                           <ChevronDown size={16} aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-blue-700" />
                         </div>
+                        {hasStatusChange && (
+                          <button
+                            type="button"
+                            onClick={() => void handleStatusSave(employee)}
+                            disabled={savingStatusEmployeeId !== null}
+                            className="mt-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {savingStatusEmployeeId === employeeId ? 'Saving...' : 'Save'}
+                          </button>
+                        )}
                         {statusErrors[employeeId] && (
                           <p role="alert" className="mt-1 max-w-48 whitespace-normal text-xs text-red-700">
                             {statusErrors[employeeId]}

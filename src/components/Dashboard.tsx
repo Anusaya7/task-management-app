@@ -453,7 +453,7 @@ const Dashboard: React.FC = () => {
       const [projectsRes, tasksRes, empRes, flagsRes, perfRes, remindersRes, dailyRes, marksRes, privateRatingsRes] = await Promise.all([
         fetch('/api/projects', { cache: 'no-store' }),
         fetch('/api/tasks'),
-        fetch('/api/employees'),
+        fetch('/api/employees', { cache: 'no-store' }),
         fetch('/api/flags'),
         fetch(`/api/performance?${performanceParams.toString()}`),
         fetch('/api/reminders'),
@@ -1323,8 +1323,8 @@ const Dashboard: React.FC = () => {
         throw new Error(data.error || 'Failed to save employee');
       }
 
+      await fetchData();
       showToast('success', isEdit ? 'Employee updated.' : 'Employee added successfully.');
-      fetchData();
     } catch (err: any) {
       throw err;
     }
