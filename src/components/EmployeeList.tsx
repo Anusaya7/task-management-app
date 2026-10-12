@@ -107,6 +107,16 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
   const canCreateEmployee = user?.role === 'Director';
   const canEditEmployee = user?.role === 'Director';
   const canDeleteEmployee = user?.role === 'Director';
+  const availableDirectorCount = employees.filter(employee =>
+    employee.role === 'Director' && employee.status !== 'Inactive'
+  ).length;
+  const shouldPreventDirectorDeactivation = (employee: Employee | null) => {
+    if (!employee || employee.role !== 'Director') return false;
+
+    const employeeId = String(employee.id || employee._id || '');
+    return employeeId === user?.id ||
+      (employee.status !== 'Inactive' && availableDirectorCount <= 1);
+  };
   const directorEmployees = employees.filter(employee => {
     if (directorStatusFilter === 'all') return true;
     return String(employee.status || 'Active') === directorStatusFilter;
@@ -193,10 +203,13 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                             value={status}
                             disabled={!employeeId || savingStatusEmployeeId !== null}
                             onChange={event => void handleStatusChange(employee, event.target.value as Employee['status'])}
+                            title={shouldPreventDirectorDeactivation(employee)
+                              ? 'Keep at least one Director account available.'
+                              : undefined}
                             className="w-full appearance-none cursor-pointer bg-transparent px-2 py-1.5 pr-7 text-[#1E293B] outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
                           >
                             <option value="Active">Active</option>
-                            <option value="Inactive">Inactive</option>
+                            <option value="Inactive" disabled={shouldPreventDirectorDeactivation(employee)}>Inactive</option>
                             <option value="Absent">Absent</option>
                           </select>
                           <ChevronDown size={16} aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-blue-700" />
@@ -241,6 +254,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
           onDelete={canDeleteEmployee ? handleDeleteEmployee : undefined}
           projects={projects}
           tasks={tasks}
+          preventDeactivation={shouldPreventDirectorDeactivation(selectedEmployee)}
         />
       </>
     );

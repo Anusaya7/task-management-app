@@ -12,6 +12,7 @@ interface EmployeeModalProps {
   onDelete?: (employeeId: string) => void;
   projects?: any[];
   tasks?: any[];
+  preventDeactivation?: boolean;
 }
 
 const ROLES: UserRole[] = ['Director', 'Project Head', 'Employee'];
@@ -21,7 +22,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   employee,
   isOpen,
   onClose,
-  onSave
+  onSave,
+  preventDeactivation = false
 }) => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -192,9 +194,14 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 {STATUSES.map(s => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s} disabled={s === 'Inactive' && preventDeactivation}>{s}</option>
                 ))}
               </select>
+              {preventDeactivation && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Keep at least one Director account available.
+                </p>
+              )}
             </div>
           </div>
 

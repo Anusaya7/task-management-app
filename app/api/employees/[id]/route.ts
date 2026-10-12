@@ -53,6 +53,23 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
     }
 
+    const removesAvailableDirector = emp.role === 'Director' &&
+      (body.status === 'Inactive' || (body.role && body.role !== 'Director'))
+    if (removesAvailableDirector) {
+      if (body.status === 'Inactive' && emp._id.toString() === user._id.toString()) {
+        return NextResponse.json({ error: 'You cannot deactivate your own Director account.' }, { status: 409 })
+      }
+
+      const remainingDirectors = await Employee.countDocuments({
+        role: 'Director',
+        status: { $ne: 'Inactive' },
+        _id: { $ne: emp._id }
+      })
+      if (remainingDirectors === 0) {
+        return NextResponse.json({ error: 'At least one available Director account must remain.' }, { status: 409 })
+      }
+    }
+
     if (body.firstName) emp.firstName = body.firstName.trim()
     if (body.lastName) emp.lastName = body.lastName.trim()
     if (body.phone !== undefined) emp.phone = body.phone.trim()
@@ -110,6 +127,21 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     const emp = await Employee.findById(params.id)
     if (!emp) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    }
+
+    if (emp.role === 'Director') {
+      if (emp._id.toString() === user._id.toString()) {
+        return NextResponse.json({ error: 'You cannot deactivate your own Director account.' }, { status: 409 })
+      }
+
+      const remainingDirectors = await Employee.countDocuments({
+        role: 'Director',
+        status: { $ne: 'Inactive' },
+        _id: { $ne: emp._id }
+      })
+      if (remainingDirectors === 0) {
+        return NextResponse.json({ error: 'At least one available Director account must remain.' }, { status: 409 })
+      }
     }
 
     emp.status = 'Inactive'
