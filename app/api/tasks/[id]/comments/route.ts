@@ -15,7 +15,11 @@ export async function POST(
 
     await dbConnect()
 
-    const { content } = await request.json()
+    const body = await request.json()
+    const content = typeof body.content === 'string' ? body.content.trim() : ''
+    if (!content) {
+      return NextResponse.json({ error: 'Comment is required.' }, { status: 400 })
+    }
 
     const comment = {
       id: Date.now().toString(),
@@ -28,15 +32,14 @@ export async function POST(
       isVisibleToEmployee: true
     }
 
-    const updatedTask = await Task.findByIdAndUpdate(
-      params.id,
-      { $push: { comments: comment } },
-      { new: true }
-    )
+    const updatedTask = await Task.findById(params.id)
 
     if (!updatedTask) {
       return NextResponse.json({ message: 'Task not found' }, { status: 404 })
     }
+    updatedTask.comments = updatedTask.comments || []
+    updatedTask.comments.push(comment)
+    await updatedTask.save()
 
     // Normalize the response
     const taskObj = updatedTask.toObject()

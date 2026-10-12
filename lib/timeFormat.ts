@@ -2,6 +2,7 @@ export const STANDARD_DAILY_HOURS = 8
 export const MAX_DAILY_HOURS = STANDARD_DAILY_HOURS
 export const MAX_LOGGED_HOURS = 24
 export const MIN_DAILY_HOURS = 1 / 60
+const TIME_INPUT_FORMAT_ERROR = 'Enter decimal hours (e.g. 0.30) or HH:MM (e.g. 00:30).'
 
 export function hoursToHHMM(hours: number): string {
   const totalMinutes = Math.max(0, Math.round((Number(hours) || 0) * 60))
@@ -12,7 +13,7 @@ export function hoursToHHMM(hours: number): string {
 
 export function parseTimeInput(value: unknown): { ok: true; hours: number } | { ok: false; error: string } {
   if (value === null || value === undefined || value === '') {
-    return { ok: false, error: 'Please enter time as HH:MM (example 01:30).' }
+    return { ok: false, error: TIME_INPUT_FORMAT_ERROR }
   }
 
   if (typeof value === 'number') {
@@ -33,7 +34,7 @@ export function parseTimeInput(value: unknown): { ok: true; hours: number } | { 
 
   const raw = String(value).trim()
   if (!raw) {
-    return { ok: false, error: 'Please enter time as HH:MM (example 01:30).' }
+    return { ok: false, error: TIME_INPUT_FORMAT_ERROR }
   }
 
   if (/^\d+(\.\d+)?$/.test(raw) && !raw.includes(':')) {
@@ -42,7 +43,7 @@ export function parseTimeInput(value: unknown): { ok: true; hours: number } | { 
 
   const match = raw.match(/^(\d{1,2}):(\d{2})$/)
   if (!match) {
-    return { ok: false, error: 'Use HH:MM format (example 01:30).' }
+    return { ok: false, error: TIME_INPUT_FORMAT_ERROR }
   }
 
   const hoursPart = Number(match[1])

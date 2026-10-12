@@ -29,6 +29,16 @@ export interface ITask extends Document {
   employeeRemark?: string
   directorRemark?: string
   projectHeadRemark?: string
+  comments?: Array<{
+    id: string
+    taskId: string
+    userId: string
+    userName: string
+    role: 'Director' | 'Project Head' | 'Employee'
+    content: string
+    timestamp: string
+    isVisibleToEmployee: boolean
+  }>
   flagStatus?: 'Open' | 'Resolved' | 'None'
   flagMessage?: string
   flagDate?: string
@@ -104,6 +114,16 @@ const taskSchema = new Schema<ITask>({
   employeeRemark: { type: String },
   directorRemark: { type: String },
   projectHeadRemark: { type: String },
+  comments: [{
+    id: { type: String, required: true },
+    taskId: { type: String, required: true },
+    userId: { type: String, required: true },
+    userName: { type: String, required: true },
+    role: { type: String, enum: ['Director', 'Project Head', 'Employee'], required: true },
+    content: { type: String, required: true },
+    timestamp: { type: String, required: true },
+    isVisibleToEmployee: { type: Boolean, default: true }
+  }],
   flagStatus: { type: String, enum: ['Open', 'Resolved', 'None'], default: 'None' },
   flagMessage: { type: String },
   flagDate: { type: String },

@@ -948,6 +948,7 @@ const Dashboard: React.FC = () => {
           assignedEmployeeIds: edit.assignedEmployeeIds,
           reminderDate: edit.reminderDate || undefined,
           dueDate: edit.reminderDate || task.dueDate,
+          nextComment: edit.comment.trim(),
           [remarkField]: edit.comment.trim()
         })
       });
@@ -956,14 +957,9 @@ const Dashboard: React.FC = () => {
         showToast('error', data.error || 'Failed to update task');
         return;
       }
-      await fetch(`/api/tasks/${id}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: edit.comment.trim() })
-      });
       setBoardEdits(prev => ({ ...prev, [id]: { ...edit, comment: '' } }));
-      showToast('success', 'Priority / in-charge / reminder updated with comment.');
-      fetchData();
+      showToast('success', 'Task details and comment saved.');
+      await fetchData();
     } catch {
       showToast('error', 'Network error.');
     } finally {
@@ -1554,7 +1550,7 @@ const Dashboard: React.FC = () => {
       />
 
       {/* Main Workspace */}
-      <div className={`flex flex-1 flex-col w-full pt-20 px-4 pb-12 md:pt-6 md:ml-64 transition-all ${isManagementDashboard ? 'md:px-6' : 'md:px-8'}`}>
+      <div className={`flex min-w-0 w-full flex-1 flex-col pt-20 px-4 pb-12 md:pt-6 md:ml-64 transition-all ${isManagementDashboard ? 'md:px-6' : 'md:px-8'}`}>
 
         {/* Sticky Corporate Top Header */}
         <div className={`flex flex-col justify-between gap-4 rounded-[14px] border border-[#E2E8F0] bg-white p-4 shadow-xs md:flex-row md:items-center md:px-6 ${isManagementDashboard ? 'mb-5 md:min-h-[84px]' : 'mb-6 md:py-4'}`}>
@@ -1605,7 +1601,7 @@ const Dashboard: React.FC = () => {
           <div className={`flex flex-wrap items-center gap-3 ${isManagementDashboard ? 'md:justify-end' : ''}`}>
             <NotificationCenter onSelectTask={() => setActiveTab('overview')} />
 
-            {!isDirector && (
+            {isManagementDashboard && (
               <button
                 type="button"
                 onClick={() => setActiveTab('today-work')}
@@ -2134,114 +2130,170 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {!isDirector && <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <section className="overflow-hidden rounded-xl border border-[#4472C4] bg-white shadow-sm" aria-label="Tasks added from Dashboard">
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#4472C4] px-4 py-3 text-white">
                 <div>
-                  <h4 className="text-sm font-extrabold text-[#0F172A]">Tasks added from Dashboard</h4>
-                  <p className="text-xs text-[#64748B]">Edit Priority / Employee / reminder and submit with the next comment</p>
+                  <h3 className="text-base font-bold">Daily Task Board</h3>
+                  <p className="mt-0.5 text-xs text-blue-100">
+                    All tasks added from Dash Board appear here with comments. Edit Priority / Employee / reminders if required, then submit with the next comment.
+                  </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-blue-50 text-[#2563EB] border border-blue-200 text-[11px] font-extrabold">
-                  {cartTasks.length} in board
+                <span className="rounded border border-white/50 px-2.5 py-1 text-xs font-bold">
+                  {cartTasks.length} {cartTasks.length === 1 ? 'task' : 'tasks'}
                 </span>
               </div>
+
               {cartTasks.length === 0 ? (
-                <p className="text-xs text-[#94A3B8] text-center py-6">
-                  Select tasks on Dashboard and add them here, same as adding items to a cart.
+                <p className="bg-[#E8EBF5] px-4 py-8 text-center text-sm text-[#64748B]">
+                  Select tasks on Dash Board and choose “Add to Daily Task Board” to review them here.
                 </p>
               ) : (
-                <div className="space-y-3">
-                  {cartTasks.map(task => {
-                    const id = taskKey(task);
-                    const edit = boardEdits[id] || {
-                      priority: task.priority,
-                      assignedEmployeeIds: [...(task.assignedEmployeeIds || [])],
-                      reminderDate: (task.reminderDate || task.dueDate || '').substring(0, 10),
-                      comment: ''
-                    };
-                    return (
-                      <div key={id} className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3.5 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-extrabold text-[#0F172A]">{task.title}</p>
-                            <p className="text-[11px] text-[#64748B]">{task.projectName} · {task.assignedEmployeeNames?.join(', ') || 'Unassigned'}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setDailyCartIds(prev => prev.filter(item => item !== id))}
-                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] cursor-pointer"
-                          >
-                            Remove from board
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                          <select
-                            value={edit.priority}
-                            onChange={(e) => setBoardEdits(prev => ({
-                              ...prev,
-                              [id]: { ...edit, priority: e.target.value as TaskPriority }
-                            }))}
-                            className="px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
-                          >
-                            <option value="Urgent">Urgent</option>
-                            <option value="Medium">Less Urgent</option>
-                            <option value="Daily">Daily Task</option>
-                            <option value="Self">Self-define</option>
-                            <option value="Low">Low Urgent</option>
-                          </select>
-                          <select
-                            value={edit.assignedEmployeeIds[0] || ''}
-                            onChange={(e) => setBoardEdits(prev => ({
-                              ...prev,
-                              [id]: { ...edit, assignedEmployeeIds: e.target.value ? [e.target.value] : [] }
-                            }))}
-                            className="px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
-                          >
-                            <option value="">Select in-charge</option>
-                            {employees.filter(e => e.status !== 'Inactive').map(emp => (
-                              <option key={String(emp.id || emp._id)} value={String(emp.id || emp._id)}>
-                                {emp.role === 'Project Head'
-                                  ? `${emp.firstName} ${emp.lastName} (Project Co-ordinator)`
-                                  : `${emp.firstName} ${emp.lastName}`}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type="date"
-                            value={edit.reminderDate}
-                            onChange={(e) => setBoardEdits(prev => ({
-                              ...prev,
-                              [id]: { ...edit, reminderDate: e.target.value }
-                            }))}
-                            className="px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs font-semibold text-[#334155]"
-                          />
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input
-                            type="text"
-                            placeholder="Next comment..."
-                            value={edit.comment}
-                            onChange={(e) => setBoardEdits(prev => ({
-                              ...prev,
-                              [id]: { ...edit, comment: e.target.value }
-                            }))}
-                            className="flex-1 px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
-                          />
-                          <button
-                            type="button"
-                            disabled={cartSubmittingId === id}
-                            onClick={() => void handleSubmitDailyBoardUpdate(task)}
-                            className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-lg cursor-pointer disabled:opacity-60"
-                          >
-                            {cartSubmittingId === id ? 'Submitting...' : 'Submit comment'}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="w-full overflow-x-auto">
+                  <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-xs">
+                    <colgroup>
+                      <col className="w-[22%]" />
+                      <col className="w-[28%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[11%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-[#4472C4] text-white">
+                        <th className="border border-white px-3 py-2.5">Task / Project</th>
+                        <th className="border border-white px-3 py-2.5">Comments / Next Comment</th>
+                        <th className="border border-white px-3 py-2.5">Employee</th>
+                        <th className="border border-white px-3 py-2.5">Priority</th>
+                        <th className="border border-white px-3 py-2.5">Reminder</th>
+                        <th className="border border-white px-3 py-2.5 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cartTasks.map((task, index) => {
+                        const id = taskKey(task);
+                        const edit = boardEdits[id] || {
+                          priority: task.priority,
+                          assignedEmployeeIds: [...(task.assignedEmployeeIds || [])],
+                          reminderDate: (task.reminderDate || task.dueDate || '').substring(0, 10),
+                          comment: ''
+                        };
+                        const previousComments = (task.comments || []).slice(-3);
+                        const legacyComment = task.directorRemark || task.projectHeadRemark;
+                        return (
+                          <tr key={id} className={index % 2 === 0 ? 'bg-[#E8EBF5]' : 'bg-[#F2F4F9]'}>
+                            <td className="border border-white px-3 py-3 align-top">
+                              <p className="font-bold text-[#172554]">{task.title}</p>
+                              <p className="mt-1 text-[11px] text-[#64748B]">{task.projectName || 'Project'}</p>
+                              <button
+                                type="button"
+                                onClick={() => setDailyCartIds(prev => prev.filter(item => item !== id))}
+                                className="mt-2 text-[11px] font-semibold text-rose-700 underline hover:text-rose-900"
+                              >
+                                Remove from board
+                              </button>
+                            </td>
+                            <td className="border border-white px-3 py-3 align-top">
+                              <div className="mb-2 max-h-28 space-y-1.5 overflow-y-auto">
+                                {previousComments.length > 0 ? previousComments.map(comment => (
+                                  <p key={comment.id} className="break-words text-[11px] leading-relaxed text-[#475569]">
+                                    <span className="font-bold text-[#334155]">{comment.userName || comment.role}:</span>{' '}
+                                    {comment.content}
+                                  </p>
+                                )) : legacyComment ? (
+                                  <p className="break-words text-[11px] leading-relaxed text-[#475569]">
+                                    <span className="font-bold text-[#334155]">Previous comment:</span> {legacyComment}
+                                  </p>
+                                ) : (
+                                  <p className="text-[11px] italic text-[#64748B]">No comments yet.</p>
+                                )}
+                              </div>
+                              <textarea
+                                rows={2}
+                                aria-label={`Next comment for ${task.title}`}
+                                placeholder="Next comment..."
+                                value={edit.comment}
+                                onChange={(e) => setBoardEdits(prev => ({
+                                  ...prev,
+                                  [id]: { ...edit, comment: e.target.value }
+                                }))}
+                                className="w-full resize-y border border-slate-300 bg-white px-2.5 py-2 text-xs text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#4472C4]"
+                              />
+                            </td>
+                            <td className="border border-white px-3 py-3 align-top">
+                              <div role="group" aria-label={`Employees for ${task.title}`} className="max-h-32 space-y-1 overflow-y-auto border border-slate-300 bg-white p-2">
+                                {employees.filter(e => e.status !== 'Inactive' && e.role === 'Employee').map(emp => {
+                                  const employeeId = String(emp.id || emp._id);
+                                  const checked = edit.assignedEmployeeIds.includes(employeeId);
+                                  return (
+                                    <label key={employeeId} className="flex items-start gap-1.5 text-[11px] leading-tight text-[#334155]">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={checked && edit.assignedEmployeeIds.length === 1}
+                                        onChange={event => setBoardEdits(prev => ({
+                                          ...prev,
+                                          [id]: {
+                                            ...edit,
+                                            assignedEmployeeIds: event.target.checked
+                                              ? Array.from(new Set([...edit.assignedEmployeeIds, employeeId]))
+                                              : edit.assignedEmployeeIds.filter(selectedId => selectedId !== employeeId)
+                                          }
+                                        }))}
+                                        className="mt-0.5 accent-[#4472C4]"
+                                      />
+                                      <span>{emp.firstName} {emp.lastName}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                            <td className="border border-white px-3 py-3 align-top">
+                              <select
+                                aria-label={`Priority for ${task.title}`}
+                                value={edit.priority}
+                                onChange={(e) => setBoardEdits(prev => ({
+                                  ...prev,
+                                  [id]: { ...edit, priority: e.target.value as TaskPriority }
+                                }))}
+                                className="w-full border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-[#334155]"
+                              >
+                                <option value="Urgent">Urgent</option>
+                                <option value="Medium">Less Urgent</option>
+                                <option value="Daily">Daily Task</option>
+                                <option value="Self">Self-define</option>
+                                <option value="Low">Low Urgent</option>
+                              </select>
+                            </td>
+                            <td className="border border-white px-3 py-3 align-top">
+                              <input
+                                type="date"
+                                aria-label={`Reminder date for ${task.title}`}
+                                value={edit.reminderDate}
+                                onChange={(e) => setBoardEdits(prev => ({
+                                  ...prev,
+                                  [id]: { ...edit, reminderDate: e.target.value }
+                                }))}
+                                className="w-full border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-[#334155]"
+                              />
+                            </td>
+                            <td className="border border-white px-3 py-3 text-center align-top">
+                              <button
+                                type="button"
+                                disabled={cartSubmittingId === id || !edit.comment.trim()}
+                                onClick={() => void handleSubmitDailyBoardUpdate(task)}
+                                className="w-full border border-[#C55A11] bg-[#ED7D31] px-2 py-2 text-xs font-bold text-white transition hover:bg-[#C55A11] disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {cartSubmittingId === id ? 'Submitting...' : 'Submit'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
-            }
+            </section>
 
             {filteredDailyBoard.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center space-y-2">
@@ -2250,31 +2302,31 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-[#64748B]">Entries appear here as soon as employees submit their daily work.</p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-sm">
-                <div className="max-h-[680px] overflow-auto">
-                  <table className="w-full min-w-[1320px] table-fixed border-collapse text-left text-xs">
+              <div className="max-w-full overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-sm">
+                <div className="max-h-[680px] max-w-full overflow-auto overscroll-x-contain">
+                  <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-xs 2xl:min-w-0">
                     <colgroup>
                       <col className="w-[16%]" />
-                      <col className="w-[13%]" />
-                      <col className="w-[18%]" />
-                      <col className="w-[13%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[19%]" />
+                      <col className="w-[12%]" />
                       <col className="w-[8%]" />
                       <col className="w-[9%]" />
                       <col className="w-[8%]" />
                       <col className="w-[7%]" />
-                      <col className="w-[8%]" />
+                      <col className="w-[11%]" />
                     </colgroup>
                     <thead className="sticky top-0 z-10">
-                      <tr className="bg-[#1E3A8A] text-[11px] font-bold uppercase tracking-wider text-white">
-                        <th className="px-4 py-3">Task</th>
-                        <th className="px-4 py-3">Description</th>
-                        <th className="px-4 py-3 bg-[#047857]">Action Taken</th>
-                        <th className="px-4 py-3">{isProjectHead ? 'Reviewed By' : 'Employee'}</th>
-                        <th className="px-4 py-3">Priority</th>
-                        <th className="px-4 py-3">Reminder</th>
-                        <th className="px-4 py-3">Date</th>
-                        <th className="px-4 py-3 text-center bg-[#047857]">Time</th>
-                        <th className="px-4 py-3">Flag &amp; Status</th>
+                      <tr className="bg-[#4472C4] text-[11px] font-bold uppercase tracking-wider text-white">
+                        <th className="px-2.5 py-3">Task</th>
+                        <th className="px-2.5 py-3">Description</th>
+                        <th className="bg-[#047857] px-2.5 py-3">Action Taken</th>
+                        <th className="px-2.5 py-3">{isProjectHead ? 'Reviewed By' : 'Employee'}</th>
+                        <th className="px-2.5 py-3">Priority</th>
+                        <th className="px-2.5 py-3">Reminder</th>
+                        <th className="px-2.5 py-3">Date</th>
+                        <th className="bg-[#047857] px-2.5 py-3 text-center">Time</th>
+                        <th className="px-2.5 py-3">Flag &amp; Status</th>
                       </tr>
                   </thead>
                     <tbody>
@@ -2348,10 +2400,10 @@ const Dashboard: React.FC = () => {
                                     )}
                                   </div>
                         </td>
-                                <td className="px-4 py-3.5">
+                                <td className="px-2.5 py-3.5">
                                   <p className="whitespace-pre-wrap break-words leading-relaxed text-[#64748B]">{entry.details || '-'}</p>
                                 </td>
-                                <td className="px-4 py-3.5 bg-emerald-50/50">
+                                <td className="bg-emerald-50/50 px-2.5 py-3.5">
                                   {isDirector && editingDailyCommentId === entryId ? (
                                     <div className="space-y-2">
                                       <textarea
@@ -2417,7 +2469,7 @@ const Dashboard: React.FC = () => {
                                     </div>
                                   )}
                                 </td>
-                                <td className="px-4 py-3.5">
+                                <td className="px-2.5 py-3.5">
                                   {isProjectHead ? (
                                     entry.reviewedByName ? (
                                       <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
@@ -2441,27 +2493,27 @@ const Dashboard: React.FC = () => {
                                     </div>
                                   )}
                                 </td>
-                                <td className="px-4 py-3.5">
+                                <td className="px-2.5 py-3.5">
                                   {relatedTask?.priority
                                     ? <PriorityBadge priority={relatedTask.priority} />
                                     : <span className="text-slate-400">-</span>}
                                 </td>
-                                <td className="px-4 py-3.5">
+                                <td className="px-2.5 py-3.5">
                                   {relatedTask?.reminderDate
                                     ? <p className="whitespace-nowrap font-semibold text-[#334155]">{formatBoardDay(relatedTask.reminderDate)}</p>
                                     : <span className="text-slate-400">No reminder</span>}
                                 </td>
-                                <td className="px-4 py-3.5">
+                                <td className="px-2.5 py-3.5">
                                   <p className="whitespace-nowrap font-bold text-[#0F172A]">{formatBoardDay(entry.date)}</p>
                                   <p className="text-[11px] font-medium text-[#94A3B8]">{formatBoardWeekday(entry.date)}</p>
                                 </td>
-                                <td className="px-4 py-3.5 text-center bg-emerald-50/50">
+                                <td className="bg-emerald-50/50 px-2.5 py-3.5 text-center">
                                   <span className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2 py-1 text-xs font-extrabold text-white shadow-xs">
                                     <Clock size={12} />
                                     {formatHoursMinutes(entry.hours)}
                                   </span>
                                 </td>
-                                <td className="px-4 py-3.5">
+                                <td className="px-2.5 py-3.5">
                                   <div className="flex flex-col items-start gap-1.5">
                                     <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${
                                       entry.status === 'Completed'
@@ -3323,15 +3375,16 @@ const Dashboard: React.FC = () => {
             )}
 
             <div className={`overflow-x-auto ${isManagementDashboard ? 'pt-8' : ''}`}>
-              <table className={`w-full border-collapse text-left text-xs ${isManagementDashboard ? (isDirector ? 'min-w-[760px] table-fixed' : 'min-w-[1120px] table-fixed') : ''}`}>
+              <table className={`w-full border-collapse text-left text-xs ${isManagementDashboard ? (isDirector ? 'min-w-[900px] table-fixed' : 'min-w-[1120px] table-fixed') : ''}`}>
                 {isManagementDashboard && (
                   <colgroup>
                     {isDirector ? (
                       <>
                         <col className="w-[5%]" />
-                        <col className="w-[42%]" />
-                        <col className="w-[28%]" />
+                        <col className="w-[35%]" />
                         <col className="w-[25%]" />
+                        <col className="w-[20%]" />
+                        <col className="w-[15%]" />
                       </>
                     ) : (
                       <>
@@ -3368,7 +3421,9 @@ const Dashboard: React.FC = () => {
                     <th className="p-3.5">Project</th>
                     <th className="p-3.5">{isManagementDashboard ? 'In-charge' : 'Assigned Staff'}</th>
                     {isManagementDashboard ? (
-                      isDirector ? null : (
+                      isDirector ? (
+                        <th className="p-3.5">Reviewed By</th>
+                      ) : (
                       <>
                         <th className="p-3.5">Priority</th>
                         <th className="p-3.5">Submitted By</th>
@@ -3562,6 +3617,30 @@ const Dashboard: React.FC = () => {
                             </td>
                           </>
                         )}
+                        {isDirector && (
+                          <td className="p-3.5">
+                            {t.approvedBy
+                              ? (() => {
+                                  const reviewer = employees.find(
+                                    employee => String(employee.id || employee._id) === String(t.approvedBy)
+                                  );
+                                  const reviewerName = reviewer
+                                    ? `${reviewer.firstName} ${reviewer.lastName}`.trim()
+                                    : String(t.approvedBy) === String(user?.id || user?._id)
+                                      ? user?.name || 'Director'
+                                      : 'Reviewer';
+                                  return (
+                                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
+                                      <UserCheck size={13} className="shrink-0" />
+                                      <span className="truncate" title={reviewerName}>{reviewerName}</span>
+                                    </span>
+                                  );
+                                })()
+                              : t.status === 'Pending Approval'
+                                ? <span className="font-semibold text-amber-700">Pending review</span>
+                                : <span className="text-[#94A3B8]">-</span>}
+                          </td>
+                        )}
                         {!isManagementDashboard && (
                         <>
                         <td className="p-3.5 whitespace-nowrap">
@@ -3661,7 +3740,7 @@ const Dashboard: React.FC = () => {
                   {groupedFilteredTasks.length === 0 && (
                     <tr>
                       <td
-                        colSpan={isManagementDashboard ? (isDirector ? 4 : 8) : 12}
+                        colSpan={isManagementDashboard ? (isDirector ? 5 : 8) : 12}
                         className="px-4 py-10 text-center text-sm text-[#64748B]"
                       >
                         {loading ? 'Loading tasks…' : 'No tasks match these filters.'}

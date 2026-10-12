@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
-import { Edit, Eye, Trash2, Plus, Download, ChevronDown } from 'lucide-react';
+import { Edit, Eye, Trash2, Plus, Download } from 'lucide-react';
 import { Project, User, Employee, ProjectRemark, ProjectStatus } from '../types';
 import ProjectModal from './ProjectModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,8 +49,6 @@ const ProjectList: React.FC<ProjectListProps> = ({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'view' | 'edit'>('create');
   const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [pendingStatus, setPendingStatus] = useState<ProjectStatus>('Ongoing');
-  const [statusError, setStatusError] = useState('');
 
   const handleCreateProject = () => {
     setSelectedProject(null);
@@ -102,16 +100,6 @@ const ProjectList: React.FC<ProjectListProps> = ({
     if (statusFilter === 'Ongoing') return normalizeProjectStatus(project.status) === 'Ongoing';
     return normalizeProjectStatus(project.status) === statusFilter;
   });
-
-  const handleBoardStatusSave = async () => {
-    if (!selectedBoardProject) return;
-    setStatusError('');
-    try {
-      await onProjectSave({ ...selectedBoardProject, status: pendingStatus });
-    } catch (error) {
-      setStatusError(error instanceof Error ? error.message : 'Failed to update project status.');
-    }
-  };
 
   const formatLatestRemark = (project: Project) => {
     const latestRemark = (project.projectRemarks || []).reduce<ProjectRemark | undefined>((latest, remark) => {
@@ -196,8 +184,6 @@ const ProjectList: React.FC<ProjectListProps> = ({
                       aria-selected={selected}
                       onClick={() => {
                         setSelectedProjectId(id);
-                        setPendingStatus(normalizedStatus);
-                        setStatusError('');
                       }}
                       className={`cursor-pointer border-t border-[#E2E8F0] transition-colors odd:bg-[#F8FAFC] hover:bg-blue-50 ${selected ? 'bg-blue-100 ring-1 ring-inset ring-blue-400' : ''}`}
                     >
@@ -215,25 +201,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
                         </button>
                       </td>
                       <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">{project.location || '-'}</td>
-                      <td className="border-r border-[#E2E8F0] px-2 py-1.5">
-                        <div className="relative">
-                          <select
-                            aria-label={`Status for ${project.projectName}`}
-                            value={selected ? pendingStatus : normalizedStatus}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) => {
-                              setSelectedProjectId(id);
-                              setPendingStatus(event.target.value as ProjectStatus);
-                              setStatusError('');
-                            }}
-                            className="w-full appearance-none cursor-pointer rounded-md border border-transparent bg-transparent px-2 py-1.5 pr-7 text-[#1E293B] focus:border-blue-500 focus:outline-none"
-                          >
-                            {PROJECT_BOARD_STATUSES.map(option => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                          <ChevronDown size={15} aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-blue-700" />
-                        </div>
+                      <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">
+                        {PROJECT_BOARD_STATUSES.find(option => option.value === normalizedStatus)?.label || normalizedStatus}
                       </td>
                       <td className="px-3 py-2.5 text-[#1E293B]">{formatLatestRemark(project)}</td>
                     </tr>
@@ -243,7 +212,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
             </table>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
             <button
               type="button"
               onClick={handleCreateProject}
@@ -267,23 +236,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
               <Trash2 size={16} />
               Remove Project
             </button>
-            <div className="flex min-h-10">
-              <button
-                type="button"
-                onClick={() => void handleBoardStatusSave()}
-                disabled={!selectedBoardProject || normalizeProjectStatus(selectedBoardProject.status) === pendingStatus}
-                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#475569] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#38465b] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600 focus-visible:ring-offset-2"
-              >
-                Change Status
-              </button>
-            </div>
           </div>
-
-          {statusError && (
-            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {statusError}
-            </p>
-          )}
 
         </section>
 

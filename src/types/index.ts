@@ -90,6 +90,17 @@ export interface TaskAssignmentHistoryRecord {
   createdAt?: string;
 }
 
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  userId: string;
+  userName: string;
+  role: UserRole;
+  content: string;
+  timestamp: string;
+  isVisibleToEmployee: boolean;
+}
+
 export interface Task {
   id?: string;
   _id?: string;
@@ -131,6 +142,7 @@ export interface Task {
   employeeRemark?: string;
   directorRemark?: string;
   projectHeadRemark?: string;
+  comments?: TaskComment[];
   createdAt?: string;
   updatedAt?: string;
 }

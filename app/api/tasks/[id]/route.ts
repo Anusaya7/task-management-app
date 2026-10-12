@@ -88,6 +88,11 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     }
 
     const body = await req.json()
+    const nextComment = typeof body.nextComment === 'string' ? body.nextComment.trim() : ''
+    if (body.nextComment !== undefined && !nextComment) {
+      return NextResponse.json({ error: 'Comment cannot be empty.' }, { status: 400 })
+    }
+
     const previousTitle = task.title
     const previousProjectId = task.projectId
     const previousProjectName = task.projectName
@@ -139,6 +144,19 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (body.estimatedHours !== undefined) {
       const hours = Number(body.estimatedHours)
       task.estimatedHours = Number.isFinite(hours) && hours >= 0 ? hours : undefined
+    }
+    if (nextComment) {
+      task.comments = task.comments || []
+      task.comments.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        taskId: task._id.toString(),
+        userId: user._id.toString(),
+        userName: `${user.firstName} ${user.lastName}`,
+        role: user.role,
+        content: nextComment,
+        timestamp: new Date().toISOString(),
+        isVisibleToEmployee: true
+      })
     }
     if (body.parentTaskId !== undefined) {
       const nextParentId = body.parentTaskId ? String(body.parentTaskId) : ''

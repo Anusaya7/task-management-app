@@ -79,9 +79,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
     }
   };
 
-  const handleStatusChange = (employee: Employee, status: Employee['status']) => {
+  const handleStatusChange = async (employee: Employee, status: Employee['status']) => {
     const employeeId = String(employee.id || employee._id || '');
-    if (!employeeId) return;
+    const currentStatus = employee.status || 'Active';
+    if (!employeeId || !status || status === currentStatus || savingStatusEmployeeId) return;
 
     setStatusDrafts(prev => ({ ...prev, [employeeId]: status }));
     setStatusErrors(prev => {
@@ -89,12 +90,6 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
       delete next[employeeId];
       return next;
     });
-  };
-
-  const handleStatusSave = async (employee: Employee) => {
-    const employeeId = String(employee.id || employee._id || '');
-    const status = statusDrafts[employeeId];
-    if (!employeeId || !status || savingStatusEmployeeId) return;
 
     setSavingStatusEmployeeId(employeeId);
     try {
@@ -108,6 +103,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
       const message = error instanceof Error ? error.message : 'Failed to update employee status.';
       console.error('Error updating employee status:', error);
       setStatusErrors(prev => ({ ...prev, [employeeId]: message }));
+      setStatusDrafts(prev => {
+        const next = { ...prev };
+        delete next[employeeId];
+        return next;
+      });
     } finally {
       setSavingStatusEmployeeId(null);
     }
@@ -199,8 +199,8 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                   const employeeId = String(employee.id || employee._id || '');
                   const employeeName = `${employee.firstName} ${employee.lastName}`.trim();
                   const status = employee.status || 'Active';
-                  const selectedStatus = statusDrafts[employeeId] || status;
-                  const hasStatusChange = selectedStatus !== status;
+                  const selectedStatus = statusDrafts[employeeId] ||
+                    (status === 'Active' || status === 'Inactive' ? status : '');
 
                   return (
                     <tr
@@ -224,21 +224,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                               : undefined}
                             className="w-full appearance-none cursor-pointer bg-transparent px-2 py-1.5 pr-7 text-[#1E293B] outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
                           >
+                            {!selectedStatus && <option value="" disabled>Select status</option>}
                             <option value="Active">Active</option>
                             <option value="Inactive" disabled={shouldPreventDirectorDeactivation(employee)}>Inactive</option>
-                            <option value="Absent">Absent</option>
                           </select>
                           <ChevronDown size={16} aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-blue-700" />
                         </div>
-                        {hasStatusChange && (
-                          <button
-                            type="button"
-                            onClick={() => void handleStatusSave(employee)}
-                            disabled={savingStatusEmployeeId !== null}
-                            className="mt-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-50"
-                          >
-                            {savingStatusEmployeeId === employeeId ? 'Saving...' : 'Save'}
-                          </button>
+                        {savingStatusEmployeeId === employeeId && (
+                          <p role="status" className="mt-1 text-xs text-blue-700">Saving...</p>
                         )}
                         {statusErrors[employeeId] && (
                           <p role="alert" className="mt-1 max-w-48 whitespace-normal text-xs text-red-700">
@@ -726,7 +719,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                           <select
                             aria-label={`Change status for ${employee.firstName} ${employee.lastName}`}
-                            value={employee.status || 'Active'}
+                            value={employee.status === 'Active' || employee.status === 'Inactive' ? employee.status : ''}
                             disabled={savingStatusEmployeeId !== null}
                             onChange={(event) => void handleStatusChange(employee, event.target.value as Employee['status'])}
                             style={{
@@ -744,10 +737,15 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
                               cursor: savingStatusEmployeeId ? 'wait' : 'pointer'
                             }}
                           >
-                            {employee.status === 'Absent' && <option value="Absent">Absent</option>}
+                            {!employee.status || (employee.status !== 'Active' && employee.status !== 'Inactive') ? (
+                              <option value="" disabled>Select status</option>
+                            ) : null}
                             <option value="Active">Active</option>
                             <option value="Inactive">Inactive</option>
                           </select>
+                          {savingStatusEmployeeId === String(employee.id || (employee as any)._id || '') && (
+                            <span role="status" style={{ color: '#1d4ed8', fontSize: '11px' }}>Saving...</span>
+                          )}
                           {statusErrors[String(employee.id || (employee as any)._id || '')] && (
                             <span role="alert" style={{ maxWidth: '180px', whiteSpace: 'normal', color: '#b91c1c', fontSize: '11px' }}>
                               {statusErrors[String(employee.id || (employee as any)._id || '')]}

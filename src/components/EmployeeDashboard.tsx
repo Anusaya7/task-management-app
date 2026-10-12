@@ -1528,8 +1528,10 @@ const EmployeeDashboard: React.FC = () => {
               <div className="px-3 py-2">
                 <input
                   type="text"
-                  inputMode="numeric"
-                  placeholder="Hours"
+                  inputMode="decimal"
+                  aria-label="Hours in decimal hours or HH:MM"
+                  aria-describedby={`hours-format-${item.boardId}`}
+                  placeholder="0.30"
                   value={item.hoursInput !== undefined ? item.hoursInput : (item.hours ? hoursToHHMM(item.hours) : '')}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -1545,6 +1547,9 @@ const EmployeeDashboard: React.FC = () => {
                       : 'border-slate-300 focus:ring-[#4472C4]'
                   }`}
                 />
+                <p id={`hours-format-${item.boardId}`} className="mt-0.5 text-[10px] text-slate-600">
+                  Decimal hours or HH:MM (0.30 = 18 min)
+                </p>
                 {errs?.hours && (
                   <p className="text-[11px] font-bold text-rose-600 mt-0.5">{errs.hours}</p>
                 )}
@@ -2845,16 +2850,20 @@ const EmployeeDashboard: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Hours (HH:MM) *
+                    Hours (decimal or HH:MM) *
                   </label>
                   <input
                     type="text"
                     required
+                    inputMode="decimal"
                     value={dailyWorkHours}
                     onChange={(e) => setDailyWorkHours(e.target.value)}
-                    placeholder="01:30"
+                    placeholder="0.30 or 00:30"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:bg-white transition"
                   />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Decimal hours or HH:MM (0.30 = 18 min; 00:30 = 30 min).
+                  </p>
                 </div>
 
                 {/* Buttons */}
