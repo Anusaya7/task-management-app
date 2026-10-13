@@ -18,6 +18,7 @@ A comprehensive project management system designed for Directors, Project Heads,
 - View and edit any task
 - Set priority levels and add comments
 - Assign marks/ratings with performance comments
+- Submit one 1–10 weekly rating per employee and project; submitted weekly ratings are visible to the employee and project heads
 - Filter tasks by project, employee, priority, and status
 - Generate performance reports
 - Lock/unlock tasks to prevent employee modifications
@@ -26,10 +27,12 @@ A comprehensive project management system designed for Directors, Project Heads,
 - Manage tasks within their projects
 - Assign tasks to employees
 - Monitor project progress
+- View weekly employee ratings for assigned projects
 - Add comments and track task status
 
 #### Employee
 - View assigned tasks
+- View weekly ratings submitted for their projects
 - Update task progress
 - Add completion comments
 - Request deadline extensions when needed
@@ -165,9 +168,9 @@ npm run build
 - Extension requests are tracked and visible to management
 
 ### Performance Rating System
-- Directors can rate employee performance (1-5 scale)
-- Rating comments provide detailed feedback
-- Ratings are visible in task details
+- Directors can submit one weekly employee rating (1–10 scale) per project and week
+- Weekly ratings and optional comments are visible to the rated employee and project heads
+- Existing private task ratings remain on a 1–5 star scale and are visible in task details
 
 ### Role-Based Filtering
 - Each role sees only relevant tasks and projects

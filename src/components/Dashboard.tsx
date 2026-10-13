@@ -28,11 +28,10 @@ import {
   EmployeeAvatar,
   SkeletonCard,
   SkeletonTable,
-  CodeBadge,
   formatHoursMinutes
 } from './BadgeUtils';
 import { isOngoingProjectStatus } from '@/lib/projectStatus';
-import { formatHierarchyCode, groupItemsByProject, sortByHierarchyCode } from '@/lib/taskHierarchy';
+import { groupItemsByProject, sortByHierarchyCode } from '@/lib/taskHierarchy';
 import {
   FolderOpen,
   CheckSquare,
@@ -90,6 +89,36 @@ const addDaysToDate = (dateString: string, days: number) => {
   const date = new Date(`${dateString}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+};
+
+const getCurrentKolkataDate = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+}).format(new Date());
+
+const getPerformancePeriodRange = (
+  view: 'week' | 'month' | 'year',
+  weekStart: string,
+  month: string,
+  year: string
+) => {
+  if (view === 'week') {
+    return { start: weekStart, end: addDaysToDate(weekStart, 6) };
+  }
+  if (view === 'month') {
+    const selectedMonthValue = /^\d{4}-\d{2}$/.test(month)
+      ? month
+      : getCurrentKolkataDate().slice(0, 7);
+    const [selectedYear, selectedMonth] = selectedMonthValue.split('-').map(Number);
+    return {
+      start: `${selectedMonthValue}-01`,
+      end: new Date(Date.UTC(selectedYear, selectedMonth, 0)).toISOString().slice(0, 10)
+    };
+  }
+  const selectedYear = /^\d{4}$/.test(year) ? year : getCurrentKolkataDate().slice(0, 4);
+  return { start: `${selectedYear}-01-01`, end: `${selectedYear}-12-31` };
 };
 
 const getShortName = (name?: string) => {
@@ -180,7 +209,7 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
           <option value="all">Project: All</option>
           {projects.map(project => (
             <option key={String(project.id || project._id)} value={String(project.id || project._id)}>
-              {project.projectCode || project.projectName}
+              {project.projectName}
             </option>
           ))}
         </select>
@@ -280,6 +309,7 @@ const Dashboard: React.FC = () => {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const projectsRequestIdRef = useRef(0);
+  const performanceMarksRequestIdRef = useRef(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
@@ -291,8 +321,10 @@ const Dashboard: React.FC = () => {
     periodStart: string;
     periodEnd: string;
     rating: number;
+    ratingScale?: number;
     comment: string;
   }>>([]);
+  const [loadedPerformanceMarksKey, setLoadedPerformanceMarksKey] = useState('');
   const [dailyEntries, setDailyEntries] = useState<DailyEntry[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -318,14 +350,7 @@ const Dashboard: React.FC = () => {
   const [ratingComment, setRatingComment] = useState<string>('');
   const [privateRatings, setPrivateRatings] = useState<PrivateRating[]>([]);
   const [savingPrivateRating, setSavingPrivateRating] = useState(false);
-  const [performanceMarkTarget, setPerformanceMarkTarget] = useState<{
-    employeeId: string;
-    employeeName: string;
-    projectId: string;
-    projectName: string;
-  } | null>(null);
-  const [performanceMarkValue, setPerformanceMarkValue] = useState(5);
-  const [performanceMarkComment, setPerformanceMarkComment] = useState('');
+  const [weeklyRatingDrafts, setWeeklyRatingDrafts] = useState<Record<string, { rating: string; comment: string }>>({});
   const [savingPerformanceMark, setSavingPerformanceMark] = useState(false);
 
   // Flag Task Modal State (Director & Project Head)
@@ -369,6 +394,16 @@ const Dashboard: React.FC = () => {
     }).format(new Date());
     return getWeekStartDate(today);
   });
+  const [performanceMonthSelection, setPerformanceMonthSelection] = useState(() => getCurrentKolkataDate().slice(0, 7));
+  const [performanceYearSelection, setPerformanceYearSelection] = useState(() => getCurrentKolkataDate().slice(0, 4));
+  const [hasSelectedPerformanceWeek, setHasSelectedPerformanceWeek] = useState(false);
+  const [expandedPerformanceEmployeeId, setExpandedPerformanceEmployeeId] = useState<string | null>(null);
+  const { start: performancePeriodStart, end: performancePeriodEnd } = getPerformancePeriodRange(
+    perfView,
+    performanceWeekStart,
+    performanceMonthSelection,
+    performanceYearSelection
+  );
 
   // Daily Task Board Filters
   const [boardEmployeeFilter, setBoardEmployeeFilter] = useState<string>('all');
@@ -435,21 +470,21 @@ const Dashboard: React.FC = () => {
 
   const fetchData = useCallback(async (isInitial = false) => {
     const projectsRequestId = ++projectsRequestIdRef.current;
+    const performanceMarksRequestId = ++performanceMarksRequestIdRef.current;
     try {
       if (isInitial) {
         setLoading(true);
       }
-      const performanceWeekEnd = addDaysToDate(performanceWeekStart, 6);
       const performanceParams = new URLSearchParams({
-        startDate: performanceWeekStart,
-        endDate: performanceWeekEnd,
+        startDate: performancePeriodStart,
+        endDate: performancePeriodEnd,
         periodStart: performanceWeekStart
       });
       if (perfProjectFilter !== 'all') performanceParams.set('projectId', perfProjectFilter);
       const markParams = new URLSearchParams({
-        periodStart: performanceWeekStart,
-        projectId: perfProjectFilter
+        periodStart: performanceWeekStart
       });
+      if (perfProjectFilter !== 'all') markParams.set('projectId', perfProjectFilter);
       const [projectsRes, tasksRes, empRes, flagsRes, perfRes, remindersRes, dailyRes, marksRes, privateRatingsRes] = await Promise.all([
         fetch('/api/projects', { cache: 'no-store' }),
         fetch('/api/tasks'),
@@ -469,7 +504,10 @@ const Dashboard: React.FC = () => {
       if (perfRes.ok) setPerformanceData(await perfRes.json());
       if (remindersRes.ok) setReminders(await remindersRes.json());
       if (dailyRes.ok) setDailyEntries(await dailyRes.json());
-      if (marksRes.ok) setPerformanceMarks(await marksRes.json());
+      if (marksRes.ok && performanceMarksRequestId === performanceMarksRequestIdRef.current) {
+        setPerformanceMarks(await marksRes.json());
+        setLoadedPerformanceMarksKey(`${perfProjectFilter}:${performanceWeekStart}`);
+      }
       if (privateRatingsRes?.ok) setPrivateRatings(await privateRatingsRes.json());
 
     } catch (err) {
@@ -479,7 +517,7 @@ const Dashboard: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [isDirector, perfProjectFilter, performanceWeekStart]);
+  }, [isDirector, perfProjectFilter, performancePeriodEnd, performancePeriodStart, performanceWeekStart]);
 
   useEffect(() => {
     fetchData(true);
@@ -542,21 +580,6 @@ const Dashboard: React.FC = () => {
   };
 
   const todayDateStr = getKolkataDateString();
-  const performanceMonthStart = `${todayDateStr.slice(0, 7)}-01`;
-  const [performanceYear, performanceMonth] = todayDateStr.slice(0, 7).split('-').map(Number);
-  const performanceMonthEnd = new Date(Date.UTC(performanceYear, performanceMonth, 0)).toISOString().slice(0, 10);
-  const performanceYearStart = `${performanceYear}-01-01`;
-  const performanceYearEnd = `${performanceYear}-12-31`;
-  const performancePeriodStart = perfView === 'week'
-    ? performanceWeekStart
-    : perfView === 'month'
-      ? performanceMonthStart
-      : performanceYearStart;
-  const performancePeriodEnd = perfView === 'week'
-    ? addDaysToDate(performanceWeekStart, 6)
-    : perfView === 'month'
-      ? performanceMonthEnd
-      : performanceYearEnd;
 
   const todayFormatted = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -1099,45 +1122,72 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleSaveWeeklyPerformanceMark = async () => {
-    if (!performanceMarkTarget) return;
-    if (!performanceMarkComment.trim()) {
-      showToast('error', 'Add a comment with the weekly performance mark.');
+  const handleSubmitWeeklyMarks = async () => {
+    if (
+      perfView !== 'week' ||
+      perfProjectFilter === 'all' ||
+      !hasSelectedPerformanceWeek ||
+      loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}`
+    ) {
+      showToast('error', 'Select a project and week before submitting weekly ratings.');
+      return;
+    }
+
+    const pendingRatings = performanceRows
+      .map(employee => {
+        const employeeId = String(employee.employeeId);
+        const draft = weeklyRatingDrafts[employeeId];
+        return draft && draft.rating && !getWeeklyMark(employeeId)
+          ? { employeeId, rating: Number(draft.rating), comment: draft.comment.trim() }
+          : null;
+      })
+      .filter((rating): rating is NonNullable<typeof rating> => rating !== null);
+
+    if (pendingRatings.length === 0) {
+      showToast('error', 'Choose a weekly rating for at least one employee.');
       return;
     }
 
     setSavingPerformanceMark(true);
     try {
-      const res = await fetch('/api/performance/marks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employeeId: performanceMarkTarget.employeeId,
-          projectId: performanceMarkTarget.projectId,
-          periodStart: performanceWeekStart,
-          rating: performanceMarkValue,
-          comment: performanceMarkComment.trim()
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showToast('error', data.error || 'Failed to save weekly performance mark.');
-        return;
-      }
+      const results = await Promise.all(pendingRatings.map(async rating => {
+        try {
+          const res = await fetch('/api/performance/marks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              employeeId: rating.employeeId,
+              projectId: perfProjectFilter,
+              periodStart: performanceWeekStart,
+              rating: rating.rating,
+              comment: rating.comment
+            })
+          });
+          const data = await res.json();
+          return res.ok
+            ? { employeeId: rating.employeeId, mark: data }
+            : { employeeId: rating.employeeId, error: data.error || 'Failed to save weekly rating.' };
+        } catch {
+          return { employeeId: rating.employeeId, error: 'Network error while saving this weekly rating.' };
+        }
+      }));
+      const savedRatings = results.filter((result): result is { employeeId: string; mark: typeof performanceMarks[number] } => 'mark' in result);
+      const failedRatings = results.filter(result => 'error' in result);
 
-      setPerformanceMarks(prev => [
-        ...prev.filter(mark =>
-          !(mark.employeeId === data.employeeId &&
-            mark.projectId === data.projectId &&
-            mark.periodStart === data.periodStart)
-        ),
-        data
-      ]);
-      setPerformanceMarkTarget(null);
-      showToast('success', 'Weekly performance mark saved.');
-      fetchData(false);
-    } catch {
-      showToast('error', 'Network error while saving weekly performance mark.');
+      if (savedRatings.length > 0) {
+        setPerformanceMarks(previous => [...previous, ...savedRatings.map(result => result.mark)]);
+        setWeeklyRatingDrafts(previous => {
+          const next = { ...previous };
+          savedRatings.forEach(result => { delete next[result.employeeId]; });
+          return next;
+        });
+      }
+      if (failedRatings.length > 0) {
+        showToast('error', `Saved ${savedRatings.length} rating(s); ${failedRatings.length} could not be saved. ${failedRatings[0].error}`);
+      } else {
+        showToast('success', `Saved weekly ratings for ${savedRatings.length} employee(s).`);
+      }
+      void fetchData(false);
     } finally {
       setSavingPerformanceMark(false);
     }
@@ -1201,35 +1251,9 @@ const Dashboard: React.FC = () => {
 
       if (!isEdit && selectedProjectTasks.length > 0) {
         const extraTitle = typeof taskData.title === 'string' ? taskData.title.trim() : '';
-        let parentId = taskData.parentTaskId ? String(taskData.parentTaskId) : '';
-
-        if (!parentId && extraTitle) {
-          const parentRes = await fetch('/api/tasks', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: extraTitle,
-              description: taskData.description || extraTitle,
-              projectId: taskData.projectId,
-              priority: taskData.priority,
-              assignedEmployeeIds: taskData.assignedEmployeeIds,
-              reminderDate: taskData.reminderDate,
-              dueDate: taskData.dueDate || taskData.reminderDate
-            })
-          });
-          if (!parentRes.ok) {
-            const data = await parentRes.json();
-            throw new Error(data.error || 'Failed to save parent task');
-          }
-          const parentTask = await parentRes.json();
-          parentId = String(parentTask.id || parentTask._id || '');
-        }
-
         let payloads = [...selectedProjectTasks];
-        if (extraTitle && parentId && !taskData.parentTaskId) {
-          payloads = payloads.filter((item: any) => String(item.title || '').trim().toLowerCase() !== extraTitle.toLowerCase());
-        } else if (extraTitle && !payloads.some((item: any) => String(item.title || '').trim().toLowerCase() === extraTitle.toLowerCase())) {
-          payloads.push({ title: extraTitle });
+        if (extraTitle && !payloads.some((item: any) => String(item.title || '').trim().toLowerCase() === extraTitle.toLowerCase())) {
+          payloads.push({ title: extraTitle, assignedEmployeeIds: taskData.assignedEmployeeIds });
         }
 
         for (const item of payloads) {
@@ -1241,10 +1265,9 @@ const Dashboard: React.FC = () => {
               description: String(item.requirement || '').trim() || taskData.description || item.title,
               projectId: taskData.projectId,
               priority: item.priority || taskData.priority,
-              assignedEmployeeIds: taskData.assignedEmployeeIds,
+              assignedEmployeeIds: item.assignedEmployeeIds || taskData.assignedEmployeeIds,
               reminderDate: taskData.reminderDate,
-              dueDate: taskData.dueDate || taskData.reminderDate,
-              parentTaskId: parentId || undefined
+              dueDate: taskData.dueDate || taskData.reminderDate
             })
           });
           if (!res.ok) {
@@ -1263,7 +1286,7 @@ const Dashboard: React.FC = () => {
                 description: String(sub.requirement || '').trim() || sub.title,
                 projectId: taskData.projectId,
                 priority: item.priority || taskData.priority,
-                assignedEmployeeIds: taskData.assignedEmployeeIds,
+                assignedEmployeeIds: item.assignedEmployeeIds || taskData.assignedEmployeeIds,
                 reminderDate: taskData.reminderDate,
                 dueDate: taskData.dueDate || taskData.reminderDate,
                 parentTaskId: savedTaskId
@@ -1364,28 +1387,36 @@ const Dashboard: React.FC = () => {
     ) || dailyEntries.some(entry =>
       String(entry.employeeId) === String(employee.employeeId) &&
       String(entry.projectId) === perfProjectFilter
+    ) || (
+      loadedPerformanceMarksKey === `${perfProjectFilter}:${performanceWeekStart}` &&
+      performanceMarks.some(mark =>
+        mark.employeeId === String(employee.employeeId) &&
+        mark.projectId === perfProjectFilter
+      )
     );
   });
-  const getWeeklyMark = (employeeId: string) => performanceMarks.find(mark =>
-    mark.employeeId === employeeId &&
-    mark.projectId === perfProjectFilter &&
-    mark.periodStart === performanceWeekStart
-  );
-  const openPerformanceMark = (employeeId: string) => {
-    const employee = performanceRows.find(row => String(row.employeeId) === employeeId);
-    if (!employee) return;
-    const mark = getWeeklyMark(employeeId);
-    setPerformanceMarkTarget({
-      employeeId,
-      employeeName: employee.employeeName || 'Employee',
-      projectId: perfProjectFilter,
-      projectName: perfProjectFilter === 'all'
-        ? 'All projects'
-        : projects.find(project => String(project.id || project._id) === perfProjectFilter)?.projectName || 'Selected project'
-    });
-    setPerformanceMarkValue(mark?.rating || 5);
-    setPerformanceMarkComment(mark?.comment || '');
+  const performanceSubmissions = dailyEntries
+    .filter(entry =>
+      entry.date >= performancePeriodStart &&
+      entry.date <= performancePeriodEnd &&
+      (perfProjectFilter === 'all' || String(entry.projectId) === perfProjectFilter)
+    )
+    .sort((first, second) => second.date.localeCompare(first.date));
+  const getWeeklyMark = (employeeId: string) => {
+    if (
+      perfProjectFilter === 'all' ||
+      perfView !== 'week' ||
+      (isDirector && !hasSelectedPerformanceWeek) ||
+      loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}`
+    ) return undefined;
+    return performanceMarks.find(mark =>
+      mark.employeeId === employeeId &&
+      mark.projectId === perfProjectFilter &&
+      mark.periodStart === performanceWeekStart
+    );
   };
+  const getWeeklyMarkScore = (mark: typeof performanceMarks[number]) =>
+    mark.ratingScale === 10 ? mark.rating : mark.rating * 2;
   const activeTasks = tasks.filter(t => ['Pending', 'In Progress'].includes(t.status));
 
   // My Tasks: active/incomplete work assigned to the logged-in Director
@@ -1462,7 +1493,6 @@ const Dashboard: React.FC = () => {
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { weekday: 'long' });
   };
 
-  const projectCodeById = new Map(projects.map(p => [String(p.id || p._id || ''), p.projectCode || '']));
   const taskCodeById = new Map(tasks.map(t => [String(t.id || t._id || ''), t.taskCode || '']));
   const taskById = new Map(tasks.map(t => [String(t.id || t._id || ''), t]));
   const boardParentOf = (taskId?: string) => {
@@ -1475,14 +1505,7 @@ const Dashboard: React.FC = () => {
     return parent ? String(parent.id || parent._id || '') : String(taskId || '');
   };
   const projectHeading = (group: { projectId: string; projectName: string }) => {
-    const code = projectCodeById.get(String(group.projectId));
-    if (!code) return group.projectName;
-    const shown = formatHierarchyCode(code);
-    const name = String(group.projectName || '').trim();
-    if (!name || name.toLowerCase() === shown.toLowerCase() || name.toLowerCase() === String(code).toLowerCase()) {
-      return shown;
-    }
-    return `${shown} — ${name}`;
+    return String(group.projectName || '').trim() || 'Project';
   };
 
   const groupedDailyBoard = groupItemsByProject(
@@ -2016,7 +2039,7 @@ const Dashboard: React.FC = () => {
                       </div>
 
                       <div>
-                        <h4 className="font-bold text-[#0F172A] text-sm leading-tight"><CodeBadge code={t.taskCode} />{t.title}</h4>
+                        <h4 className="font-bold text-[#0F172A] text-sm leading-tight">{t.title}</h4>
                         <p className="text-xs text-[#64748B] mt-0.5">Project: <span className="font-semibold text-[#334155]">{t.projectName}</span></p>
                       </div>
 
@@ -2368,7 +2391,6 @@ const Dashboard: React.FC = () => {
                                 <tr className="border-b border-[#E2E8F0] bg-slate-50">
                                   <td colSpan={9} className="px-4 py-2 pl-6">
                                     <p className="break-words text-[13px] font-extrabold text-[#0F172A]">
-                                      <CodeBadge code={parent.taskCode} />
                                       {parent.title}
                                     </p>
                                   </td>
@@ -2381,7 +2403,6 @@ const Dashboard: React.FC = () => {
                                   <div className="flex items-start justify-between gap-2">
                                     <p className={`break-words text-[13px] text-[#0F172A] ${parent ? 'font-semibold' : 'font-extrabold'}`}>
                                       {parent && <span className="mr-1.5 text-slate-400">-</span>}
-                                      <CodeBadge code={taskCodeById.get(String(entry.taskId))} />
                                       {entry.taskTitle}
                                     </p>
                                     {entry.status === 'Completed' && relatedTask && entry.employeeId && entry.taskId !== 'OFFICE_WORK' && (
@@ -2586,7 +2607,7 @@ const Dashboard: React.FC = () => {
                       {group.items.map(t => (
                         <li key={t.id || t._id} className={`flex items-start gap-2 text-sm text-[#334155] ${t.parentTaskId ? 'pl-6' : ''}`}>
                           <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#2563EB] flex-shrink-0" />
-                          <span className="flex-1"><CodeBadge code={t.taskCode} />{t.title}</span>
+                          <span className="flex-1">{t.title}</span>
                           <span className="text-[10px] font-bold rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">{t.status}</span>
                         </li>
                       ))}
@@ -2674,7 +2695,6 @@ const Dashboard: React.FC = () => {
                           {projectHeading({ projectId: String(entry.projectId || ''), projectName: entry.projectName || 'Project' })}
                         </td>
                         <td className="p-3.5 font-bold text-[#0F172A]">
-                          <CodeBadge code={taskCodeById.get(String(entry.taskId))} />
                           {entry.taskTitle}
                         </td>
                         <td className="p-3.5 text-[#64748B]">{entry.details || '-'}</td>
@@ -2745,7 +2765,7 @@ const Dashboard: React.FC = () => {
                   <option value="all">Project: All</option>
                   {projects.map(p => (
                     <option key={String(p.id || p._id)} value={String(p.id || p._id)}>
-                      {p.projectCode || p.projectName}
+                      {p.projectName}
                     </option>
                   ))}
                 </select>
@@ -3076,36 +3096,86 @@ const Dashboard: React.FC = () => {
                   <span>Project:</span>
                   <select
                     value={perfProjectFilter}
-                    onChange={event => setPerfProjectFilter(event.target.value)}
+                    onChange={event => {
+                      setPerfProjectFilter(event.target.value);
+                      setWeeklyRatingDrafts({});
+                    }}
                     className="min-w-36 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
                   >
-                    <option value="all">All</option>
+                    <option value="all">All projects</option>
                     {projects.map(project => (
                       <option key={String(project.id || project._id)} value={String(project.id || project._id)}>
-                        {project.projectCode || project.projectName}
+                        {project.projectName}
                       </option>
                     ))}
                   </select>
                 </label>
+                {perfView === 'week' ? (
+                  <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
+                    <span>Week starting:</span>
+                    <input
+                      type="date"
+                      value={isDirector && !hasSelectedPerformanceWeek ? '' : performanceWeekStart}
+                      onChange={event => {
+                        if (!event.target.value) {
+                          setHasSelectedPerformanceWeek(false);
+                          setWeeklyRatingDrafts({});
+                          return;
+                        }
+                        const weekStart = getWeekStartDate(event.target.value);
+                        if (!weekStart) return;
+                        setPerformanceWeekStart(weekStart);
+                        setHasSelectedPerformanceWeek(true);
+                        setWeeklyRatingDrafts({});
+                      }}
+                      aria-label="Select a week, starting Monday"
+                      className="rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
+                    />
+                  </label>
+                ) : perfView === 'month' ? (
+                  <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
+                    <span>Month:</span>
+                    <input
+                      type="month"
+                      value={performanceMonthSelection}
+                      onChange={event => setPerformanceMonthSelection(event.target.value)}
+                      aria-label="Select performance month"
+                      className="rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
+                    />
+                  </label>
+                ) : (
+                  <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
+                    <span>Year:</span>
+                    <input
+                      type="number"
+                      min="2000"
+                      max="2100"
+                      value={performanceYearSelection}
+                      onChange={event => setPerformanceYearSelection(event.target.value)}
+                      aria-label="Select performance year"
+                      className="w-24 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
+                    />
+                  </label>
+                )}
               </div>
             </div>
 
             <div className="overflow-x-auto rounded-lg border border-[#E2E8F0]">
-              <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
+              <table className="w-full min-w-[900px] table-fixed border-collapse text-left">
                 <colgroup>
-                  <col className="w-[19%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[23%]" />
                   <col className="w-[27%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[29%]" />
-                  <col className="w-[10%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-[#1E293B] text-xs font-semibold text-white">
                     <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Employee</th>
                     <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Tasks done</th>
                     <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Hours logged</th>
-                    <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Comments reviewed</th>
-                    <th className="whitespace-nowrap px-2 py-3">Marks (/10)</th>
+                    <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Employee submissions &amp; comments</th>
+                    <th className="whitespace-nowrap px-2 py-3">Weekly marks (/10)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2E8F0] text-sm">
@@ -3116,54 +3186,179 @@ const Dashboard: React.FC = () => {
                       </td>
                     </tr>
                   ) : performanceRows.map(employee => {
-                    const metrics = perfView === 'month'
-                      ? employee.monthly
-                      : perfView === 'year'
-                        ? employee.yearly
-                        : employee.custom;
+                    const metrics = employee.custom;
                     const weeklyMark = getWeeklyMark(String(employee.employeeId));
+                    const employeeSubmissions = performanceSubmissions.filter(
+                      entry => String(entry.employeeId) === String(employee.employeeId)
+                    );
+                    const employeeId = String(employee.employeeId);
                     const taskCount = metrics?.taskCount ?? metrics?.workDone ?? 0;
                     const workHours = metrics?.workHours ?? 0;
                     return (
-                      <tr key={String(employee.employeeId)} className="text-[#334155] hover:bg-[#F8FAFC]">
+                      <React.Fragment key={employeeId}>
+                      <tr className="text-[#334155] hover:bg-[#F8FAFC]">
                         <td className="border-r border-[#E2E8F0] px-3 py-4 font-semibold text-[#0F172A]">{employee.employeeName || 'Employee'}</td>
                         <td className="border-r border-[#E2E8F0] px-3 py-4 text-base font-semibold">{taskCount}</td>
                         <td className="border-r border-[#E2E8F0] px-3 py-4">{formatHoursMinutes(workHours)}</td>
                         <td className="border-r border-[#E2E8F0] px-3 py-4">
-                          <span className={`inline-flex rounded-full px-4 py-1.5 text-sm font-semibold ${
-                            weeklyMark?.comment?.trim()
-                              ? 'bg-[#DCFCE7] text-[#15803D]'
-                              : 'bg-[#F1F5F9] text-[#64748B]'
-                          }`}>
-                            {weeklyMark?.comment?.trim() ? 'Yes' : 'No'}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedPerformanceEmployeeId(
+                              expandedPerformanceEmployeeId === employeeId ? null : employeeId
+                            )}
+                            aria-expanded={expandedPerformanceEmployeeId === employeeId}
+                            className="rounded-full bg-[#EFF6FF] px-3 py-1.5 text-xs font-semibold text-[#1D4ED8] hover:bg-[#DBEAFE]"
+                          >
+                            {expandedPerformanceEmployeeId === employeeId ? 'Hide' : 'View'} {employeeSubmissions.length} {employeeSubmissions.length === 1 ? 'submission' : 'submissions'}
+                          </button>
                         </td>
-                        <td className="px-2 py-4 text-xs">
-                          {weeklyMark ? `${weeklyMark.rating * 2}/10` : '—'}
+                        <td className="px-2 py-3 text-xs">
+                          {perfView !== 'week' ? (
+                            <span className="text-[#64748B]">Switch to Week view to rate</span>
+                          ) : perfProjectFilter === 'all' ? (
+                            <span className="text-[#64748B]">Select a project to rate</span>
+                          ) : isDirector && !hasSelectedPerformanceWeek ? (
+                            <span className="text-[#64748B]">Select a week to rate</span>
+                          ) : weeklyMark ? (
+                            <div>
+                              <span className="font-bold text-[#0F172A]">{getWeeklyMarkScore(weeklyMark)}/10</span>
+                              {weeklyMark.comment?.trim() && (
+                                <p className="mt-1 whitespace-pre-wrap text-[11px] text-[#64748B]">
+                                  {weeklyMark.comment}
+                                </p>
+                              )}
+                            </div>
+                          ) : isDirector ? (
+                            <div className="space-y-2">
+                              <label className="block text-[10px] font-semibold text-[#64748B]">
+                                Weekly Rating (1–10)
+                                <select
+                                  value={weeklyRatingDrafts[String(employee.employeeId)]?.rating || ''}
+                                  onChange={event => setWeeklyRatingDrafts(previous => ({
+                                    ...previous,
+                                    [String(employee.employeeId)]: {
+                                      rating: event.target.value,
+                                      comment: previous[String(employee.employeeId)]?.comment || ''
+                                    }
+                                  }))}
+                                  disabled={
+                                    perfProjectFilter === 'all' ||
+                                    !hasSelectedPerformanceWeek ||
+                                    loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` ||
+                                    savingPerformanceMark
+                                  }
+                                  className="mt-1 block w-full rounded-lg border border-[#CBD5E1] bg-white px-2 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB] disabled:cursor-not-allowed disabled:bg-[#F1F5F9]"
+                                >
+                                  <option value="">Select rating</option>
+                                  {Array.from({ length: 10 }, (_, index) => index + 1).map(rating => (
+                                    <option key={rating} value={rating}>{rating} / 10</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <input
+                                type="text"
+                                value={weeklyRatingDrafts[String(employee.employeeId)]?.comment || ''}
+                                onChange={event => setWeeklyRatingDrafts(previous => ({
+                                  ...previous,
+                                  [String(employee.employeeId)]: {
+                                    rating: previous[String(employee.employeeId)]?.rating || '',
+                                    comment: event.target.value
+                                  }
+                                }))}
+                                disabled={
+                                  perfProjectFilter === 'all' ||
+                                  !hasSelectedPerformanceWeek ||
+                                  loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` ||
+                                  savingPerformanceMark
+                                }
+                                placeholder="Director comment (optional)"
+                                aria-label={`Optional weekly comment for ${employee.employeeName || 'employee'}`}
+                                className="block w-full rounded-lg border border-[#CBD5E1] bg-white px-2 py-1.5 text-xs text-[#0F172A] outline-none focus:border-[#2563EB] disabled:cursor-not-allowed disabled:bg-[#F1F5F9]"
+                              />
+                            </div>
+                          ) : '—'}
                         </td>
                       </tr>
+                      {expandedPerformanceEmployeeId === employeeId && (
+                        <tr className="bg-[#F8FAFC]">
+                          <td colSpan={5} className="border-t border-[#E2E8F0] px-4 py-4">
+                            {employeeSubmissions.length === 0 ? (
+                              <p className="text-sm text-[#64748B]">No employee submissions for this period and project.</p>
+                            ) : (
+                              <div className="max-h-80 space-y-3 overflow-y-auto">
+                                {employeeSubmissions.map((entry, index) => (
+                                  <article
+                                    key={String(entry.id || entry._id || `${entry.date}-${entry.taskId}-${index}`)}
+                                    className="rounded-lg border border-[#E2E8F0] bg-white p-3"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <h4 className="font-semibold text-[#0F172A]">{entry.taskTitle || 'Submitted work'}</h4>
+                                      <span className="text-xs text-[#64748B]">
+                                        {entry.date} · {formatHoursMinutes(entry.hours)} hrs · {entry.status}
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 text-xs text-[#64748B]">
+                                      {entry.projectName || projects.find(project =>
+                                        String(project.id || project._id) === String(entry.projectId)
+                                      )?.projectName || 'Project'}
+                                    </p>
+                                    {entry.details && (
+                                      <p className="mt-2 whitespace-pre-wrap text-sm text-[#334155]">
+                                        <span className="font-semibold">Description: </span>{entry.details}
+                                      </p>
+                                    )}
+                                    {entry.actionTaken && (
+                                      <p className="mt-2 whitespace-pre-wrap text-sm text-[#334155]">
+                                        <span className="font-semibold">Employee comment / action: </span>{entry.actionTaken}
+                                      </p>
+                                    )}
+                                    {entry.flagComment && (
+                                      <p className="mt-2 whitespace-pre-wrap rounded-md bg-amber-50 p-2 text-sm text-amber-800">
+                                        <span className="font-semibold">Flag comment: </span>{entry.flagComment}
+                                      </p>
+                                    )}
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
 
-            {isDirector && (
+            {isDirector && perfView === 'week' && (
               <button
                 type="button"
-                onClick={() => performanceRows[0] && openPerformanceMark(String(performanceRows[0].employeeId))}
-                disabled={performanceRows.length === 0}
+                onClick={() => void handleSubmitWeeklyMarks()}
+                disabled={
+                  performanceRows.length === 0 ||
+                  perfProjectFilter === 'all' ||
+                  !hasSelectedPerformanceWeek ||
+                  loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` ||
+                  savingPerformanceMark ||
+                  !performanceRows.some(employee =>
+                    Boolean(weeklyRatingDrafts[String(employee.employeeId)]?.rating) &&
+                    !getWeeklyMark(String(employee.employeeId))
+                  )
+                }
                 className="rounded-lg bg-[#2563EB] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Submit Weekly Marks
+                {savingPerformanceMark ? 'Submitting...' : 'Submit Weekly Marks'}
               </button>
             )}
 
             <p className="text-xs text-[#64748B]">
-              Weekly marks are submitted once per employee and project. Select a project above before submitting marks for that project.
+              {isDirector
+                ? 'In Week view, select a project and week to enter weekly ratings. Submitted ratings are locked and visible to employees and project heads.'
+                : 'Select Week view, a project, and a week to view submitted weekly ratings.'}
             </p>
             <p className="text-xs text-[#64748B]">
-              Showing data for {performancePeriodStart} to {performancePeriodEnd}. Marks retain the existing 1–5 rating and display as a score out of 10.
+              Showing {perfView} data for {performancePeriodStart} to {performancePeriodEnd}. Weekly ratings are scored out of 10.
             </p>
           </div>
         )}
@@ -3287,7 +3482,7 @@ const Dashboard: React.FC = () => {
                   <option value="all">Project: All</option>
                   {projects.map(p => (
                     <option key={String(p.id || p._id)} value={String(p.id || p._id)}>
-                      {p.projectCode || p.projectName}
+                      {p.projectName}
                     </option>
                   ))}
                 </select>
@@ -3482,7 +3677,6 @@ const Dashboard: React.FC = () => {
                                 aria-label={`Edit ${t.title}`}
                               >
                                 {t.parentTaskId && <span className="mr-1 text-slate-400">↳</span>}
-                                <CodeBadge code={t.taskCode} />
                                 {t.title}
                               </button>
                               {isDirector && (
@@ -3501,7 +3695,6 @@ const Dashboard: React.FC = () => {
                           ) : (
                             <>
                               {t.parentTaskId && <span className="mr-1 text-slate-400">↳</span>}
-                              <CodeBadge code={t.taskCode} />
                               {t.title}
                             </>
                           )}
@@ -3989,83 +4182,6 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {performanceMarkTarget && (
-          <div className="fixed inset-0 bg-[#0F172A]/70 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-[14px] shadow-2xl max-w-md w-full p-6 space-y-4 border border-[#E2E8F0]">
-              <div>
-                <h3 className="text-base font-bold text-[#0F172A]">Weekly Performance Mark</h3>
-                <p className="text-xs text-[#64748B] mt-1">
-                  {performanceMarkTarget.employeeName} · {performanceMarkTarget.projectName} · {performanceWeekStart} to {addDaysToDate(performanceWeekStart, 6)}
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-[#475569]">Employee</label>
-                <select
-                  value={performanceMarkTarget.employeeId}
-                  onChange={event => openPerformanceMark(event.target.value)}
-                  className="w-full rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
-                >
-                  {performanceRows.map(employee => (
-                    <option key={String(employee.employeeId)} value={String(employee.employeeId)}>
-                      {employee.employeeName || 'Employee'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[#475569] uppercase tracking-wider mb-2">Performance ({performanceMarkValue * 2}/10)</label>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5].map(mark => (
-                    <button
-                      key={mark}
-                      type="button"
-                      onClick={() => setPerformanceMarkValue(mark)}
-                      className={`p-2.5 rounded-lg border transition cursor-pointer ${
-                        performanceMarkValue >= mark ? 'bg-[#FFFBEB] border-[#FDE68A] text-[#D97706]' : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#CBD5E1]'
-                      }`}
-                      aria-label={`${mark} out of 5`}
-                    >
-                      <Star size={24} className={performanceMarkValue >= mark ? 'fill-[#D97706]' : ''} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[#475569] uppercase tracking-wider mb-1">Director Comment</label>
-                <textarea
-                  rows={3}
-                  value={performanceMarkComment}
-                  onChange={(e) => setPerformanceMarkComment(e.target.value)}
-                  placeholder="Add feedback on the employee's submitted work for this week..."
-                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg text-xs text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-[#E2E8F0]">
-                <button
-                  type="button"
-                  onClick={() => setPerformanceMarkTarget(null)}
-                  disabled={savingPerformanceMark}
-                  className="px-4 py-2 text-xs font-semibold text-[#64748B] hover:bg-[#F1F5F9] rounded-lg transition cursor-pointer disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveWeeklyPerformanceMark()}
-                  disabled={savingPerformanceMark}
-                  className="px-4 py-2 bg-[#D97706] hover:bg-[#B45309] text-white font-bold text-xs rounded-lg shadow-xs transition cursor-pointer disabled:opacity-50"
-                >
-                  {savingPerformanceMark ? 'Saving...' : 'Save Weekly Mark'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Project Modal */}
         <ProjectModal
           isOpen={isProjectModalOpen}
@@ -4093,6 +4209,8 @@ const Dashboard: React.FC = () => {
           employee={selectedEmployee}
           onClose={() => setIsEmployeeModalOpen(false)}
           onSave={handleSaveEmployee}
+          projects={projects}
+          employees={employees}
         />
 
       </div>

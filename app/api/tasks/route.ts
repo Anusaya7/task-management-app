@@ -118,6 +118,12 @@ export async function POST(req: Request) {
     if (!project) {
       return NextResponse.json({ error: 'Selected Project does not exist' }, { status: 400 })
     }
+    if (
+      user.role === 'Project Head' &&
+      !(user.assignedProjects || []).includes(project._id.toString())
+    ) {
+      return NextResponse.json({ error: 'Project Head can only create tasks for assigned projects.' }, { status: 403 })
+    }
 
     let resolvedParentId = ''
     let resolvedParentTitle = ''
@@ -165,14 +171,24 @@ export async function POST(req: Request) {
       }
     } else if (user.role === 'Project Head') {
       const allowed = user.assignedEmployees || []
-      const requested = Array.isArray(assignedEmployeeIds) ? assignedEmployeeIds : []
-      if (allowed.length > 0) {
-        validAssignees = requested.filter(id => allowed.includes(id) || id === user._id.toString())
-      } else {
-        validAssignees = requested.length > 0 ? requested : [user._id.toString()]
+      const requested = Array.from(new Set(
+        (Array.isArray(assignedEmployeeIds) ? assignedEmployeeIds : [])
+          .filter((id: unknown): id is string => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id))
+      ))
+      if (allowed.length === 0 || requested.some(id => !allowed.includes(id))) {
+        return NextResponse.json({ error: 'Project Head can only assign tasks to assigned employees.' }, { status: 403 })
+      }
+      const employeeDocs = await Employee.find({
+        _id: { $in: requested },
+        role: 'Employee',
+        status: 'Active'
+      }).select('_id firstName lastName')
+      validAssignees = employeeDocs.map(emp => emp._id.toString())
+      if (validAssignees.length !== requested.length) {
+        return NextResponse.json({ error: 'Project Head can only assign tasks to active employees in their scope.' }, { status: 400 })
       }
       if (validAssignees.length === 0) {
-        return NextResponse.json({ error: 'Project Head can only assign tasks to allowed employees' }, { status: 403 })
+        return NextResponse.json({ error: 'Please assign at least one employee.' }, { status: 400 })
       }
     } else {
       // Employee role: Self task only

@@ -6,6 +6,7 @@ export interface IPerformanceMark extends Document {
   periodStart: string
   periodEnd: string
   rating: number
+  ratingScale: number
   comment: string
   directorId: string
   createdAt: Date
@@ -17,8 +18,9 @@ const performanceMarkSchema = new Schema<IPerformanceMark>({
   projectId: { type: String, required: true, default: 'all' },
   periodStart: { type: String, required: true },
   periodEnd: { type: String, required: true },
-  rating: { type: Number, required: true, min: 1, max: 5 },
-  comment: { type: String, required: true },
+  rating: { type: Number, required: true, min: 1, max: 10 },
+  ratingScale: { type: Number, enum: [5, 10], default: 5 },
+  comment: { type: String, default: '' },
   directorId: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }

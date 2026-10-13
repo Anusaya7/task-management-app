@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import Employee from '@/models/Employee'
 import Attendance from '@/models/Attendance'
+import Project from '@/models/Project'
 import { getAuthUser, hashPassword, getTodayKolkata } from '@/lib/auth'
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
@@ -74,6 +75,50 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (body.lastName) emp.lastName = body.lastName.trim()
     if (body.phone !== undefined) emp.phone = body.phone.trim()
     if (body.role) emp.role = body.role
+    if (body.role && body.role !== 'Project Head') {
+      emp.assignedProjects = []
+      emp.assignedEmployees = []
+    }
+
+    if (body.assignedProjects !== undefined) {
+      if (emp.role !== 'Project Head' || !Array.isArray(body.assignedProjects)) {
+        return NextResponse.json({ error: 'Project access can only be assigned to a Project Head.' }, { status: 400 })
+      }
+      const projectIds = body.assignedProjects.filter(
+        (id: unknown): id is string => typeof id === 'string' && id.length > 0
+      )
+      if (projectIds.length !== body.assignedProjects.length) {
+        return NextResponse.json({ error: 'Project IDs must be valid strings.' }, { status: 400 })
+      }
+      const uniqueProjectIds: string[] = Array.from(new Set<string>(projectIds))
+      const existingProjects = await Project.countDocuments({ _id: { $in: uniqueProjectIds } })
+      if (existingProjects !== uniqueProjectIds.length) {
+        return NextResponse.json({ error: 'One or more selected projects no longer exist.' }, { status: 400 })
+      }
+      emp.assignedProjects = uniqueProjectIds
+    }
+
+    if (body.assignedEmployees !== undefined) {
+      if (emp.role !== 'Project Head' || !Array.isArray(body.assignedEmployees)) {
+        return NextResponse.json({ error: 'Employee access can only be assigned to a Project Head.' }, { status: 400 })
+      }
+      const employeeIds = body.assignedEmployees.filter(
+        (id: unknown): id is string => typeof id === 'string' && id.length > 0
+      )
+      if (employeeIds.length !== body.assignedEmployees.length) {
+        return NextResponse.json({ error: 'Employee IDs must be valid strings.' }, { status: 400 })
+      }
+      const uniqueEmployeeIds: string[] = Array.from(new Set<string>(employeeIds))
+      const activeEmployees = await Employee.countDocuments({
+        _id: { $in: uniqueEmployeeIds },
+        role: 'Employee',
+        status: 'Active'
+      })
+      if (activeEmployees !== uniqueEmployeeIds.length) {
+        return NextResponse.json({ error: 'Project Heads can only be assigned existing active employees.' }, { status: 400 })
+      }
+      emp.assignedEmployees = uniqueEmployeeIds
+    }
 
     if (body.status && body.status !== emp.status) {
       emp.status = body.status
@@ -90,9 +135,6 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         })
       }
     }
-
-    if (body.assignedProjects) emp.assignedProjects = body.assignedProjects
-    if (body.assignedEmployees) emp.assignedEmployees = body.assignedEmployees
 
     if (body.newPassword) {
       emp.passwordHash = await hashPassword(body.newPassword)

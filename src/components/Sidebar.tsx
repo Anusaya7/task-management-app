@@ -58,10 +58,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'profile', label: 'Profile', icon: User }
   ];
 
-  // Project Head — same as Director tabs excluding Project Board / Employee Board
+  // Project Heads manage only the projects and employees assigned by a Director.
   const projectHeadTabs: NavItem[] = [
     { id: 'overview', label: 'Dash Board', icon: LayoutDashboard },
     { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
+    { id: 'projects', label: 'Project Board', icon: FolderOpen },
     { id: 'completed', label: 'Completed Task History', icon: CheckCircle2 },
     { id: 'performance', label: 'Performance', icon: BarChart3 },
     { id: 'profile', label: 'Profile', icon: User }

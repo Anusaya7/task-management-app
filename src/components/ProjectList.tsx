@@ -11,7 +11,7 @@ import { normalizeProjectStatus } from '@/lib/projectStatus';
 interface ProjectListProps {
   projects: Project[];
   users: (User | Employee)[];
-  onProjectSave: (project: Project) => void;
+  onProjectSave: (project: Project) => void | Promise<void>;
   onProjectDelete: (projectId: string) => void;
   onProjectComplete?: (project: Project) => void;
   onCommentAdded?: (projectId: string, comment: any) => void;
@@ -49,6 +49,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'view' | 'edit'>('create');
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [savingStatusProjectId, setSavingStatusProjectId] = useState<string | null>(null);
+  const [statusSaveError, setStatusSaveError] = useState('');
 
   const handleCreateProject = () => {
     setSelectedProject(null);
@@ -79,6 +81,23 @@ const ProjectList: React.FC<ProjectListProps> = ({
     } catch (error: any) {
       console.error('Error saving project:', error);
       // Keep modal open if there's an error
+    }
+  };
+
+  const handleBoardStatusChange = async (project: Project, status: ProjectStatus) => {
+    const id = String(project.id || project._id || '');
+    if (!id || normalizeProjectStatus(project.status) === status || savingStatusProjectId) return;
+
+    setSavingStatusProjectId(id);
+    setStatusSaveError('');
+    try {
+      await onProjectSave({ ...project, status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update project status.';
+      console.error('Error updating project status:', error);
+      setStatusSaveError(`${project.projectName || project.projectNumber}: ${message}`);
+    } finally {
+      setSavingStatusProjectId(null);
     }
   };
 
@@ -201,8 +220,26 @@ const ProjectList: React.FC<ProjectListProps> = ({
                         </button>
                       </td>
                       <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">{project.location || '-'}</td>
-                      <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">
-                        {PROJECT_BOARD_STATUSES.find(option => option.value === normalizedStatus)?.label || normalizedStatus}
+                      <td className="border-r border-[#E2E8F0] px-2 py-1.5 text-[#1E293B]">
+                        <select
+                          aria-label={`Change status for ${project.projectName || project.projectNumber}`}
+                          value={normalizedStatus}
+                          disabled={savingStatusProjectId !== null}
+                          onClick={event => event.stopPropagation()}
+                          onChange={event => void handleBoardStatusChange(project, event.target.value as ProjectStatus)}
+                          className="min-h-9 w-full cursor-pointer rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-[#1E293B] outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-200 disabled:cursor-wait disabled:opacity-60"
+                          title="Click to change project status"
+                        >
+                          {PROJECT_BOARD_STATUSES.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        {savingStatusProjectId === id && (
+                          <p role="status" className="px-2 text-xs text-blue-700">Saving...</p>
+                        )}
+                        {statusSaveError.startsWith(`${project.projectName || project.projectNumber}:`) && (
+                          <p role="alert" className="px-2 text-xs text-red-700">{statusSaveError}</p>
+                        )}
                       </td>
                       <td className="px-3 py-2.5 text-[#1E293B]">{formatLatestRemark(project)}</td>
                     </tr>
@@ -211,6 +248,9 @@ const ProjectList: React.FC<ProjectListProps> = ({
               </tbody>
             </table>
           </div>
+          <p role="status" className="sr-only">
+            {statusSaveError ? `Status update failed. ${statusSaveError}` : ''}
+          </p>
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
             <button

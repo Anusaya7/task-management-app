@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Task, Project, Employee, TaskPriority } from '../types';
 import { AlertCircle, Check, ChevronDown, Search, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { formatHierarchyCode } from '@/lib/taskHierarchy';
 
 interface TaskModalProps {
   task?: Task | null;
@@ -51,6 +50,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [taskRequirements, setTaskRequirements] = useState<Record<string, string>>({});
   const [taskSubtasks, setTaskSubtasks] = useState<Record<string, Array<{ title: string; requirement: string }>>>({});
   const [taskPriorities, setTaskPriorities] = useState<Record<string, TaskPriority>>({});
+  const [taskEmployeeIds, setTaskEmployeeIds] = useState<Record<string, string[]>>({});
   const [customTasks, setCustomTasks] = useState<Array<{ key: string; title: string }>>([]);
   const customTaskCounter = useRef(0);
   const [parentTaskId, setParentTaskId] = useState('');
@@ -83,6 +83,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
     setTaskRequirements({});
     setTaskSubtasks({});
     setTaskPriorities({});
+    setTaskEmployeeIds({});
     setCustomTasks([]);
     setEmployeeSearch('');
     setIsEmployeeMenuOpen(false);
@@ -111,8 +112,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
   }, [isEmployeeMenuOpen]);
 
   const assignableEmployees = useMemo(
-    () => employees.filter(emp => emp.status !== 'Inactive' && emp.role !== 'Director'),
-    [employees]
+    () => employees.filter(emp =>
+      emp.status !== 'Inactive' &&
+      emp.role !== 'Director' &&
+      (user?.role !== 'Project Head' || emp.role === 'Employee')
+    ),
+    [employees, user?.role]
   );
 
   const projectKey = (project: Project) => String(project.id || project._id || '');
@@ -123,7 +128,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   );
 
   const projectTaskOptions = useMemo(() => {
-    type Option = { key: string; title: string; date?: string; code?: string; priority?: TaskPriority };
+    type Option = { key: string; title: string; date?: string; priority?: TaskPriority };
     if (!selectedProject) return [] as Option[];
     const remarks = selectedProject.projectRemarks || [];
     const options: Option[] = [];
@@ -142,7 +147,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         ? `remark-${remarkId}`
         : `remark-${index}-${remark.date || ''}-${title}`;
       const matched = taskForTitle(title);
-      options.push({ key, title, date: remark.date, code: matched?.taskCode, priority: matched?.priority });
+      options.push({ key, title, date: remark.date, priority: matched?.priority });
       remarkTitles.add(title.toLowerCase());
     });
 
@@ -154,24 +159,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
         key: `task-${item.id || item._id || title}`,
         title,
         date: item.createdAt ? String(item.createdAt).substring(0, 10) : undefined,
-        code: item.taskCode,
         priority: item.priority
       });
     });
 
     return options;
   }, [selectedProject, existingTasks, projectId]);
-
-  const parentTaskOptions = useMemo(() => {
-    if (!projectId) return [] as Task[];
-    const currentId = task ? String(task.id || (task as any)._id || '') : '';
-    return existingTasks.filter(item =>
-      String(item.projectId) === String(projectId) &&
-      item.priority !== 'Self' &&
-      !item.parentTaskId &&
-      String(item.id || item._id || '') !== currentId
-    );
-  }, [existingTasks, projectId, task]);
 
   const showProjectTaskList = !isEmployee && !task;
   const isDirectorPriority = (value?: TaskPriority) =>
@@ -218,6 +211,19 @@ const TaskModal: React.FC<TaskModalProps> = ({
     setEmployeeSearch('');
   };
 
+  const toggleTaskEmployee = (taskKey: string, employeeId: string) => {
+    setTaskEmployeeIds(prev => {
+      const current = prev[taskKey] || [];
+      return {
+        ...prev,
+        [taskKey]: current.includes(employeeId)
+          ? current.filter(id => id !== employeeId)
+          : [...current, employeeId]
+      };
+    });
+    setFieldErrors(prev => ({ ...prev, projectTasks: undefined }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitLockRef.current || isSubmitting) return;
@@ -233,6 +239,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         ...item,
         priority: priorityForTask(item.key),
         requirement: (taskRequirements[item.key] || '').trim(),
+        assignedEmployeeIds: Array.from(new Set(taskEmployeeIds[item.key] || [])),
         subtasks: parentTaskId
           ? []
           : (taskSubtasks[item.key] || [])
@@ -240,9 +247,20 @@ const TaskModal: React.FC<TaskModalProps> = ({
               .filter(sub => sub.title)
       }));
     const nextErrors: { title?: string; projectId?: string; employees?: string; projectTasks?: string } = {};
+    const extraTitleIsSeparate = Boolean(trimmedTitle) &&
+      !selectedItems.some(item => item.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
 
     if (!projectId) nextErrors.projectId = 'Please select a Project.';
-    if (!isEmployee && selectedEmployeeIds.length === 0) nextErrors.employees = 'Please select at least one employee.';
+    if (!isEmployee && !showProjectTaskList && selectedEmployeeIds.length === 0) {
+      nextErrors.employees = 'Please select at least one employee.';
+    }
+    if (!isEmployee && showProjectTaskList) {
+      if (selectedItems.some(item => item.assignedEmployeeIds.length === 0)) {
+        nextErrors.projectTasks = 'Assign at least one employee to every selected task.';
+      } else if (extraTitleIsSeparate && selectedEmployeeIds.length === 0) {
+        nextErrors.employees = 'Please select at least one employee for the additional task.';
+      }
+    }
     if (task || isEmployee) {
       if (!trimmedTitle) nextErrors.title = 'Task Title is required.';
     } else if (selectedItems.length === 0 && !trimmedTitle) {
@@ -271,7 +289,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         assignedEmployeeIds: isEmployee && user?.id ? [user.id] : Array.from(new Set(selectedEmployeeIds)),
         reminderDate: reminderDate || undefined,
         dueDate: reminderDate || undefined,
-        parentTaskId: !isEmployee && parentTaskId ? parentTaskId : undefined,
+        parentTaskId: task && !isEmployee && parentTaskId ? parentTaskId : undefined,
         selectedProjectTasks: !isEmployee && !task && selectedItems.length > 0 ? selectedItems : undefined
       });
       onClose();
@@ -326,6 +344,28 @@ const TaskModal: React.FC<TaskModalProps> = ({
         placeholder={`What exactly needs to be done in ${title}?`}
         className="w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
       />
+      {!parentTaskId && showProjectTaskList && (
+        <div className="mt-2">
+          <p className="mb-1 block text-[11px] font-semibold text-slate-600">Assign employees *</p>
+          <div className="grid grid-cols-1 gap-1 rounded-lg border border-slate-200 bg-white p-2 sm:grid-cols-2">
+            {assignableEmployees.map(employee => {
+              const employeeId = getEmpId(employee);
+              const checked = (taskEmployeeIds[key] || []).includes(employeeId);
+              return (
+                <label key={employeeId} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-slate-700 hover:bg-blue-50">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleTaskEmployee(key, employeeId)}
+                    className="h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                  />
+                  <span>{getEmpName(employee)}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {!parentTaskId && (
         <div className="mt-2 space-y-2 border-l-2 border-indigo-200 pl-3">
           {(taskSubtasks[key] || []).map((sub, subIndex) => (
@@ -431,6 +471,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     setTaskRequirements({});
                     setTaskSubtasks({});
                     setTaskPriorities({});
+                    setTaskEmployeeIds({});
                     setCustomTasks([]);
                     setParentTaskId('');
                     if (fieldErrors.projectId) setFieldErrors(prev => ({ ...prev, projectId: undefined, projectTasks: undefined }));
@@ -442,7 +483,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     const id = projectKey(p);
                     return (
                       <option key={id} value={id}>
-                        {p.projectCode ? `${formatHierarchyCode(p.projectCode)} — ` : ''}{p.projectName} ({p.projectNumber})
+                        {p.projectName}
                       </option>
                     );
                   })}
@@ -458,7 +499,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
           <div>
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Tasks for {selectedProject?.projectCode || selectedProject?.projectName || 'Selected Project'}
+                    Tasks for {selectedProject?.projectName || 'Selected Project'}
                     {projectTaskOptions.length > 0 && (
                       <span className="ml-1 normal-case tracking-normal text-slate-500">
                         ({projectTaskOptions.length})
@@ -509,9 +550,6 @@ const TaskModal: React.FC<TaskModalProps> = ({
                           />
                           <span className="min-w-0 flex-1">
                             <span className="flex flex-wrap items-center gap-1.5 font-semibold">
-                              {item.code && (
-                                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700">{item.code}</span>
-                              )}
                               {item.title}
                             </span>
                             {item.date && (
@@ -580,32 +618,6 @@ const TaskModal: React.FC<TaskModalProps> = ({
           </div>
             )}
 
-            {!isEmployee && projectId && (
-          <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                  Parent Task (optional)
-            </label>
-            <select
-                  value={parentTaskId}
-                  onChange={(e) => setParentTaskId(e.target.value)}
-                  className={inputClass()}
-                >
-                  <option value="">-- None (top-level task) --</option>
-                  {parentTaskOptions.map(item => {
-                    const id = String(item.id || item._id || '');
-                    return (
-                      <option key={id} value={id}>
-                        {item.taskCode || item.title}
-                </option>
-                    );
-                  })}
-            </select>
-                <p className="mt-1 text-[11px] font-medium text-slate-500">
-                  Optional: pick an existing main task to add the selected tasks under it.
-              </p>
-              </div>
-            )}
-
             {!hideTitleField && (
           <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
@@ -661,10 +673,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
             )}
 
-            {!isEmployee && (
+            {!isEmployee && (!showProjectTaskList || Boolean(title.trim())) && (
               <div ref={employeeMenuRef}>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                  Assign Employees *
+                  {showProjectTaskList ? 'Assign Employees to Additional Task *' : 'Assign Employees *'}
                     </label>
                 {selectedEmployees.length > 0 && (
                   <div className="mb-2">

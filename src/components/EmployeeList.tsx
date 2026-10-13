@@ -93,7 +93,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
 
     setSavingStatusEmployeeId(employeeId);
     try {
-      await onEmployeeSave({ ...employee, status });
+      const statusUpdate: Employee = { ...employee, status };
+      delete statusUpdate.assignedProjects;
+      delete statusUpdate.assignedEmployees;
+      await onEmployeeSave(statusUpdate);
       setStatusDrafts(prev => {
         const next = { ...prev };
         delete next[employeeId];
@@ -272,6 +275,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
           onSave={handleEmployeeSave}
           onDelete={canDeleteEmployee ? handleDeleteEmployee : undefined}
           projects={projects}
+          employees={employees}
           tasks={tasks}
           preventDeactivation={shouldPreventDirectorDeactivation(selectedEmployee)}
         />
@@ -913,6 +917,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({
         onSave={handleEmployeeSave}
         onDelete={canDeleteEmployee ? handleDeleteEmployee : undefined}
         projects={projects}
+        employees={employees}
         tasks={tasks}
       />
     </div>

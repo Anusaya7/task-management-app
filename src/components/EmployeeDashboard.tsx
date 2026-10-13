@@ -41,12 +41,11 @@ import {
 } from 'lucide-react';
 import { formatHierarchyCode, groupItemsByProject, orderMainTasksFirst, sortByHierarchyCode, titleRepeatsCode } from '@/lib/taskHierarchy';
 
-type CategoryType = 'URGENT' | 'LESS_URGENT' | 'LOW_URGENT' | 'All' | 'SELF_DEFINED' | 'DAILY_TASK';
+type CategoryType = 'URGENT' | 'LESS_URGENT' | 'All' | 'SELF_DEFINED' | 'DAILY_TASK';
 
 interface CategoryConfig {
   id: CategoryType;
   label: string;
-  dbPriority: TaskPriority;
   bgColor: string;
   hoverColor: string;
   activeRing: string;
@@ -57,7 +56,6 @@ const CATEGORIES: CategoryConfig[] = [
   {
     id: 'URGENT',
     label: 'Urgent',
-    dbPriority: 'Urgent',
     bgColor: '#DC2626',
     hoverColor: '#B91C1C',
     activeRing: 'ring-[#DC2626]',
@@ -66,16 +64,14 @@ const CATEGORIES: CategoryConfig[] = [
   {
     id: 'LESS_URGENT',
     label: 'Less Urgent',
-    dbPriority: 'Medium',
     bgColor: '#64748B',
     hoverColor: '#475569',
     activeRing: 'ring-[#64748B]',
     textColor: '#FFFFFF'
   },
   {
-    id: 'LOW_URGENT',
-    label: 'Low Urgent',
-    dbPriority: 'Low',
+    id: 'All',
+    label: 'All',
     bgColor: '#7C3AED',
     hoverColor: '#6D28D9',
     activeRing: 'ring-[#7C3AED]',
@@ -84,7 +80,6 @@ const CATEGORIES: CategoryConfig[] = [
   {
     id: 'SELF_DEFINED',
     label: 'Self Defined',
-    dbPriority: 'Self',
     bgColor: '#6366F1',
     hoverColor: '#4F46E5',
     activeRing: 'ring-[#6366F1]',
@@ -93,7 +88,6 @@ const CATEGORIES: CategoryConfig[] = [
   {
     id: 'DAILY_TASK',
     label: 'Daily Task',
-    dbPriority: 'Daily',
     bgColor: '#16A34A',
     hoverColor: '#15803D',
     activeRing: 'ring-[#16A34A]',
@@ -187,6 +181,14 @@ const EmployeeDashboard: React.FC = () => {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [performance, setPerformance] = useState<EmployeePerformance | null>(null);
+  const [directorPerformanceMarks, setDirectorPerformanceMarks] = useState<Array<{
+    projectId: string;
+    periodStart: string;
+    periodEnd: string;
+    rating: number;
+    ratingScale?: number;
+    comment: string;
+  }>>([]);
   const [dailyHistory, setDailyHistory] = useState<DailyEntry[]>([]);
   
   const [loading, setLoading] = useState(true);
@@ -232,10 +234,14 @@ const EmployeeDashboard: React.FC = () => {
   const [reportFlaggedFilter, setReportFlaggedFilter] = useState<string>('ALL');
 
   // Completed History Sub-Tab
-  const [completedHistorySubTab, setCompletedHistorySubTab] = useState<'daily' | 'tasks'>('daily');
+  const [completedHistorySubTab, setCompletedHistorySubTab] = useState<'daily' | 'tasks'>('tasks');
   const [completedHistoryProjectFilter, setCompletedHistoryProjectFilter] = useState('ALL');
   const [completedHistoryEmployeeFilter, setCompletedHistoryEmployeeFilter] = useState('ALL');
   const [completedHistoryTimeFilter, setCompletedHistoryTimeFilter] = useState<'all' | 'date' | 'week' | 'month'>('all');
+  const [performancePeriod, setPerformancePeriod] = useState<'day' | 'week' | 'month' | 'year' | 'custom'>('month');
+  const [performanceStartDate, setPerformanceStartDate] = useState('');
+  const [performanceEndDate, setPerformanceEndDate] = useState('');
+  const [performanceLoading, setPerformanceLoading] = useState(false);
 
   // Reminder & Flag Reply states
   const [reminderReplies, setReminderReplies] = useState<Record<string, string>>({});
@@ -260,13 +266,64 @@ const EmployeeDashboard: React.FC = () => {
 
   const todayDateStr = getKolkataDateString();
 
+  useEffect(() => {
+    if (performanceStartDate && performanceEndDate) return;
+    setPerformanceStartDate(`${todayDateStr.slice(0, 7)}-01`);
+    setPerformanceEndDate(todayDateStr);
+  }, [todayDateStr, performanceStartDate, performanceEndDate]);
+
+  const setPerformancePreset = (period: typeof performancePeriod) => {
+    setPerformancePeriod(period);
+    if (period === 'custom') return;
+
+    const end = new Date(`${todayDateStr}T00:00:00Z`);
+    const start = new Date(end);
+    if (period === 'week') {
+      start.setUTCDate(end.getUTCDate() - ((end.getUTCDay() + 6) % 7));
+    } else if (period === 'month') {
+      start.setUTCDate(1);
+    } else if (period === 'year') {
+      start.setUTCMonth(0, 1);
+    }
+    const startDate = period === 'day' ? todayDateStr : start.toISOString().slice(0, 10);
+    setPerformanceStartDate(startDate);
+    setPerformanceEndDate(todayDateStr);
+  };
+
+  const loadPerformanceRange = async () => {
+    if (!performanceStartDate || !performanceEndDate || performanceStartDate > performanceEndDate) {
+      setMessage({ type: 'error', text: 'Choose a valid performance start and end date.' });
+      return;
+    }
+    setPerformanceLoading(true);
+    try {
+      const params = new URLSearchParams({ startDate: performanceStartDate, endDate: performanceEndDate });
+      const response = await fetch(`/api/performance?${params.toString()}`);
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Unable to load performance for the selected dates.');
+      }
+      if (!Array.isArray(result) || !result[0]) {
+        throw new Error('No performance data was returned for this account.');
+      }
+      setPerformance(result[0]);
+      setMessage(null);
+    } catch (error) {
+      console.error('Failed to load selected performance range:', error);
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Unable to load performance for the selected dates.'
+      });
+    } finally {
+      setPerformanceLoading(false);
+    }
+  };
+
   // Performance data refresh ordering
   const perfRequestIdRef = useRef(0);
 
-  const weeklyPerformanceRows = performance?.weeklyHistory || [];
-  const latestPerformanceMark = [...weeklyPerformanceRows]
-    .reverse()
-    .find(week => week.rating !== null)?.rating ?? null;
+  const performanceWeeklyRows = performance?.weeklyHistory || [];
+  const selectedPerformanceMark = performance?.custom?.marking ?? null;
   const formatPerformanceHours = (hours: number) => {
     const rounded = Math.round(hours * 100) / 100;
     return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
@@ -290,14 +347,17 @@ const EmployeeDashboard: React.FC = () => {
       if (isInitial) {
         setLoading(true);
       }
-      const [tasksRes, openingTasksRes, projectsRes, remindersRes, flagsRes, perfRes, historyRes] = await Promise.all([
+      const [tasksRes, openingTasksRes, projectsRes, remindersRes, flagsRes, perfRes, historyRes, performanceMarksRes] = await Promise.all([
         fetch('/api/tasks'),
         fetch('/api/tasks?view=employee-opening'),
         fetch('/api/projects'),
         fetch('/api/reminders'),
         fetch('/api/flags'),
-        fetch('/api/performance'),
-        fetch('/api/daily-entries')
+        fetch(performanceStartDate && performanceEndDate
+          ? `/api/performance?${new URLSearchParams({ startDate: performanceStartDate, endDate: performanceEndDate }).toString()}`
+          : '/api/performance'),
+        fetch('/api/daily-entries'),
+        fetch('/api/performance/marks', { cache: 'no-store' })
       ]);
 
       if (tasksRes.ok) {
@@ -333,6 +393,12 @@ const EmployeeDashboard: React.FC = () => {
           setPerformance(perfData[0]);
         }
       }
+
+      if (!performanceMarksRes.ok) {
+        const result = await performanceMarksRes.json();
+        throw new Error(result.error || 'Unable to load your weekly director ratings.');
+      }
+      setDirectorPerformanceMarks(await performanceMarksRes.json());
 
       if (historyRes.ok) {
         const historyData = await historyRes.json();
@@ -1096,7 +1162,7 @@ const EmployeeDashboard: React.FC = () => {
     const norm = (p || '').toLowerCase();
     if (norm.includes('urgent') && !norm.includes('less') && !norm.includes('low') && !norm.includes('upcoming')) return 'URGENT';
     if (norm.includes('medium') || norm.includes('less')) return 'LESS_URGENT';
-    if (norm.includes('low')) return 'LOW_URGENT';
+    if (norm.includes('low')) return 'All';
     if (norm.includes('self')) return 'SELF_DEFINED';
     return 'DAILY_TASK';
   };
@@ -1195,7 +1261,7 @@ const EmployeeDashboard: React.FC = () => {
   const openAssignedTasks = openingTasks.filter(t => t.status !== 'Completed' && taskIdOf(t));
   const categoryRowMap = new Map<string, CategoryTaskRow>();
   for (const t of openAssignedTasks) {
-    if (mapPriorityToCategory(t.priority) !== activeCategory) continue;
+    if (activeCategory !== 'All' && mapPriorityToCategory(t.priority) !== activeCategory) continue;
     const id = taskIdOf(t);
     const parentId = String(t.parentTaskId || '');
     const mainId = parentId && parentId !== id ? parentId : id;
@@ -1830,7 +1896,7 @@ const EmployeeDashboard: React.FC = () => {
                       Task List &bull; {
                         activeCategory === 'URGENT' ? 'Urgent Tasks' :
                         activeCategory === 'LESS_URGENT' ? 'Less Urgent Tasks' :
-                        activeCategory === 'LOW_URGENT' ? 'Low Urgent Tasks' :
+                        activeCategory === 'All' ? 'All Assigned Tasks' :
                         activeCategory === 'SELF_DEFINED' ? 'Self Defined Tasks' :
                         'Daily Tasks'
                       }
@@ -1862,7 +1928,7 @@ const EmployeeDashboard: React.FC = () => {
                       {
                         activeCategory === 'URGENT' ? 'Urgent Tasks' :
                         activeCategory === 'LESS_URGENT' ? 'Less Urgent Tasks' :
-                        activeCategory === 'LOW_URGENT' ? 'Low Urgent Tasks' :
+                        activeCategory === 'All' ? 'All Assigned Tasks' :
                         activeCategory === 'SELF_DEFINED' ? 'Self Defined Tasks' :
                         'Daily Tasks'
                       } ({categoryTaskRows.length})
@@ -1904,7 +1970,7 @@ const EmployeeDashboard: React.FC = () => {
                       {
                         activeCategory === 'URGENT' ? 'No urgent tasks assigned.' :
                         activeCategory === 'LESS_URGENT' ? 'No less urgent tasks assigned.' :
-                        activeCategory === 'LOW_URGENT' ? 'No low urgent tasks assigned.' :
+                        activeCategory === 'All' ? 'No active tasks assigned.' :
                         activeCategory === 'SELF_DEFINED' ? 'No self-defined tasks added yet.' :
                         'No daily tasks assigned.'
                       }
@@ -2215,7 +2281,7 @@ const EmployeeDashboard: React.FC = () => {
             <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-200 gap-4">
               <div>
                 <h3 className="text-lg font-black text-[#172554]">Completed Task History</h3>
-                <p className="text-xs text-slate-500">View only — submitted daily entry history and finished tasks</p>
+                <p className="text-xs text-slate-500">Completed tasks assigned to your employee account.</p>
               </div>
 
               <div className="flex items-center gap-2">
@@ -2240,6 +2306,13 @@ const EmployeeDashboard: React.FC = () => {
                   Completed Tasks ({tasks.filter(t => t.status === 'Completed').length})
                 </button>
               </div>
+            </div>
+
+            <div role="status" className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <ShieldCheck size={18} className="mt-0.5 flex-shrink-0 text-blue-700" aria-hidden="true" />
+              <p>
+                <span className="font-bold">Read-only history.</span> You can review completed tasks here; editing, deleting, and shifting tasks are disabled.
+              </p>
             </div>
 
             <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
@@ -2340,53 +2413,56 @@ const EmployeeDashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
+                  <table className="w-full min-w-[1180px] border-collapse text-left text-xs">
                     <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-extrabold uppercase border-b border-slate-200">
-                        <th className="py-3.5 px-4">Project Name</th>
-                        <th className="py-3.5 px-4">Task Title</th>
-                        <th className="py-3.5 px-4">Employee Name</th>
-                        <th className="py-3.5 px-4">Completion Date</th>
-                        <th className="py-3.5 px-4 text-center">Completion Status</th>
-                        <th className="py-3.5 px-4 text-center">Work Done %</th>
-                        <th className="py-3.5 px-4 text-center">Time Spent</th>
-                        <th className="py-3.5 px-4">Action Taken</th>
-                        <th className="py-3.5 px-4">Role Remarks</th>
+                      <tr className="bg-[#1E3A5F] font-extrabold uppercase tracking-wide text-white">
+                        <th className="border-b border-slate-300 px-4 py-3.5">Project Name</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5">Task Title</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5">Employee Name</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5">Completion Date</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5 text-center">Completion Status</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5 text-center">Work Done %</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5 text-center">Time Spent</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5">Action Taken</th>
+                        <th className="border-b border-slate-300 px-4 py-3.5">Role Remarks</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 font-medium">
-                      {filteredCompletedTasks.map(t => {
-                          const taskIdStr = t.id || t._id;
-                          const taskEntries = filteredCompletedDailyHistory.filter(e => e.taskId === taskIdStr);
-                          const hoursWorked = taskEntries.reduce((acc, e) => acc + (Number(e.hours) || 0), 0);
-                          const actionTaken = taskEntries.length > 0 ? (taskEntries[0].actionTaken || '—') : '—';
-                          const compDate = t.approvalDate
-                            ? new Date(t.approvalDate).toLocaleDateString('en-IN')
-                            : (t.updatedAt ? new Date(t.updatedAt).toLocaleDateString('en-IN') : todayDateStr);
+                      {filteredCompletedTasks.map((task, index) => {
+                          const taskIdStr = String(task.id || task._id || '');
+                          const taskEntries = filteredCompletedDailyHistory
+                            .filter(entry => String(entry.taskId || '') === taskIdStr)
+                            .sort((first, second) => String(second.date || '').localeCompare(String(first.date || '')));
+                          const hoursWorked = taskEntries.reduce((total, entry) => total + (Number(entry.hours) || 0), 0);
+                          const actionTaken = taskEntries.find(entry => entry.actionTaken?.trim())?.actionTaken || '—';
+                          const completedDate = task.approvalDate || task.updatedAt;
+                          const compDate = completedDate
+                            ? new Date(completedDate).toLocaleDateString('en-IN')
+                            : todayDateStr;
 
                           return (
-                            <tr key={taskIdStr} className="hover:bg-slate-50 transition">
-                              <td className="py-3.5 px-4 font-bold text-slate-900">{t.projectName}</td>
-                              <td className="py-3.5 px-4 font-bold text-indigo-700"><CodeBadge code={t.taskCode} />{t.title}</td>
-                              <td className="py-3.5 px-4 text-slate-600">{user?.name}</td>
-                              <td className="py-3.5 px-4 text-slate-600">{compDate}</td>
-                              <td className="py-3.5 px-4 text-center">
-                                <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
+                            <tr key={taskIdStr} className={index % 2 === 0 ? 'bg-white hover:bg-blue-50/40' : 'bg-slate-50 hover:bg-blue-50/40'}>
+                              <td className="px-4 py-3.5 font-bold text-slate-900">{task.projectName || '—'}</td>
+                              <td className="px-4 py-3.5 font-bold text-indigo-700">{task.title}</td>
+                              <td className="px-4 py-3.5 text-slate-600">{task.assignedEmployeeNames?.join(', ') || user?.name || '—'}</td>
+                              <td className="whitespace-nowrap px-4 py-3.5 text-slate-600">{compDate}</td>
+                              <td className="px-4 py-3.5 text-center">
+                                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-800">
+                                  <CheckCircle2 size={12} aria-hidden="true" />
                                   Completed
                                 </span>
                               </td>
-                              <td className="py-3.5 px-4 text-center font-black text-emerald-600">
-                                100%
+                              <td className="px-4 py-3.5 text-center font-black text-emerald-600">
+                                {task.workDone ?? 100}%
                               </td>
-                              <td className="py-3.5 px-4 text-center font-black text-indigo-600 whitespace-nowrap">
-                                {hoursWorked > 0 ? formatHoursMinutes(hoursWorked) : '-'}
+                              <td className="whitespace-nowrap px-4 py-3.5 text-center font-black text-indigo-600">
+                                {hoursWorked > 0 ? formatHoursMinutes(hoursWorked) : '—'}
                               </td>
-                              <td className="py-3.5 px-4 text-slate-700">{actionTaken}</td>
-                              <td className="py-3.5 px-4 text-slate-600 space-y-1">
-                                <div><span className="font-bold text-slate-700">Employee Remark:</span> {t.employeeRemark || actionTaken || 'None'}</div>
-                                <div><span className="font-bold text-slate-700">Director Remark:</span> {t.directorRemark || t.approvalRemarks || 'None'}</div>
-                                <div><span className="font-bold text-slate-700">Project Head Remark:</span> {t.projectHeadRemark || 'None'}</div>
-                                <div><span className="font-bold text-slate-700">Status:</span> <span className="font-bold text-emerald-700">{t.status}</span></div>
+                              <td className="max-w-[220px] px-4 py-3.5 text-slate-700">{actionTaken}</td>
+                              <td className="min-w-[260px] space-y-1 px-4 py-3.5 text-slate-600">
+                                <div><span className="font-bold text-slate-700">Employee:</span> {task.employeeRemark || actionTaken || '—'}</div>
+                                <div><span className="font-bold text-slate-700">Director:</span> {task.directorRemark || task.approvalRemarks || '—'}</div>
+                                <div><span className="font-bold text-slate-700">Project Head:</span> {task.projectHeadRemark || '—'}</div>
                               </td>
                             </tr>
                           );
@@ -2508,11 +2584,65 @@ const EmployeeDashboard: React.FC = () => {
               Performance
             </h2>
 
+            <div className="flex flex-col gap-3 rounded-lg border border-[#D9E2EF] bg-white p-4 sm:flex-row sm:items-end">
+              <label className="min-w-[150px] flex-1 text-xs font-semibold text-slate-700">
+                Period
+                <select
+                  value={performancePeriod}
+                  onChange={event => setPerformancePreset(event.target.value as typeof performancePeriod)}
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                >
+                  <option value="day">Day</option>
+                  <option value="week">Week</option>
+                  <option value="month">Month</option>
+                  <option value="year">Year</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </label>
+              <label className="min-w-[150px] flex-1 text-xs font-semibold text-slate-700">
+                Start date
+                <input
+                  type="date"
+                  value={performanceStartDate}
+                  max={todayDateStr}
+                  onChange={event => {
+                    setPerformancePeriod('custom');
+                    setPerformanceStartDate(event.target.value);
+                  }}
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                />
+              </label>
+              <label className="min-w-[150px] flex-1 text-xs font-semibold text-slate-700">
+                End date
+                <input
+                  type="date"
+                  value={performanceEndDate}
+                  max={todayDateStr}
+                  onChange={event => {
+                    setPerformancePeriod('custom');
+                    setPerformanceEndDate(event.target.value);
+                  }}
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadPerformanceRange()}
+                disabled={performanceLoading}
+                className="min-h-10 rounded-lg bg-[#2563EB] px-5 text-sm font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-wait disabled:opacity-60"
+              >
+                {performanceLoading ? 'Loading...' : 'Apply'}
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {[
-                { label: 'Tasks done', value: weeklyPerformanceRows.reduce((total, week) => total + week.tasksDone, 0) },
-                { label: 'Hours logged', value: formatPerformanceHours(weeklyPerformanceRows.reduce((total, week) => total + week.hoursLogged, 0)) },
-                { label: 'Latest marks', value: latestPerformanceMark === null ? '— / 10' : `${formatPerformanceMark(latestPerformanceMark * 2)} / 10` }
+                { label: 'Tasks done', value: performance?.custom?.taskCount ?? 0 },
+                { label: 'Hours logged', value: formatPerformanceHours(performance?.custom?.workHours ?? 0) },
+                {
+                  label: 'Marks',
+                  value: selectedPerformanceMark === null ? '— / 10' : `${formatPerformanceMark(selectedPerformanceMark * 2)} / 10`
+                }
               ].map(card => (
                 <div
                   key={card.label}
@@ -2526,7 +2656,7 @@ const EmployeeDashboard: React.FC = () => {
             </div>
 
             <div className="overflow-x-auto border border-[#D9E2EF] bg-white">
-              <table className="w-full min-w-[640px] border-collapse text-left text-sm text-[#172033]">
+              <table className="w-full min-w-[600px] border-collapse text-left text-sm text-[#172033]">
                 <thead>
                   <tr className="bg-[#334155] text-white">
                     <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Week</th>
@@ -2536,15 +2666,15 @@ const EmployeeDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {weeklyPerformanceRows.length === 0 ? (
+                  {performanceWeeklyRows.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-4 text-sm text-slate-500">
-                        No weekly performance data available yet.
+                        No performance data available for the selected dates.
                       </td>
                     </tr>
-                  ) : weeklyPerformanceRows.map((week, index) => (
+                  ) : performanceWeeklyRows.map((week, index) => (
                     <tr key={week.periodStart} className={index % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}>
-                      <td className="border border-[#E2E8F0] px-2.5 py-2.5">Week {index + 1}</td>
+                      <td className="border border-[#E2E8F0] px-2.5 py-2.5 whitespace-nowrap">{week.periodStart} - {week.periodEnd}</td>
                       <td className="border border-[#E2E8F0] px-2.5 py-2.5">{week.tasksDone}</td>
                       <td className="border border-[#E2E8F0] px-2.5 py-2.5">{formatPerformanceHours(week.hoursLogged)}</td>
                       <td className="border border-[#E2E8F0] px-2.5 py-2.5">
@@ -2556,8 +2686,43 @@ const EmployeeDashboard: React.FC = () => {
               </table>
             </div>
 
-            <div className="rounded-lg border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-sm text-[#1D4ED8]">
-              Employee can see only their own performance.
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-base font-bold text-[#172554]">Weekly ratings from the Director</h3>
+                <p className="mt-1 text-xs text-slate-500">Submitted project ratings are visible here and cannot be changed.</p>
+              </div>
+              <div className="overflow-x-auto border border-[#D9E2EF] bg-white">
+                <table className="w-full min-w-[600px] border-collapse text-left text-sm text-[#172033]">
+                  <thead>
+                    <tr className="bg-[#334155] text-white">
+                      <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Week</th>
+                      <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Project</th>
+                      <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Rating (/10)</th>
+                      <th className="border border-[#94A3B8] px-2.5 py-2 font-bold">Director comment</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {directorPerformanceMarks.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-4 text-sm text-slate-500">
+                          No weekly Director ratings have been submitted yet.
+                        </td>
+                      </tr>
+                    ) : directorPerformanceMarks.map(mark => {
+                      const project = projects.find(item => String(item.id || item._id) === mark.projectId);
+                      const score = mark.ratingScale === 10 ? mark.rating : mark.rating * 2;
+                      return (
+                        <tr key={`${mark.projectId}-${mark.periodStart}`} className="bg-white">
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5 whitespace-nowrap">{mark.periodStart} - {mark.periodEnd}</td>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5">{project?.projectName || 'Project'}</td>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5 font-bold">{score} / 10</td>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5">{mark.comment || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
         )}

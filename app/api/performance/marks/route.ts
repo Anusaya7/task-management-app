@@ -80,60 +80,54 @@ export async function POST(req: Request) {
     await connectToDatabase()
     const body = await req.json()
     const employeeId = typeof body.employeeId === 'string' ? body.employeeId : ''
-    const projectId = typeof body.projectId === 'string' && body.projectId ? body.projectId : 'all'
+    const projectId = typeof body.projectId === 'string' ? body.projectId : ''
     const periodStart = body.periodStart
     const rating = Number(body.rating)
     const comment = typeof body.comment === 'string' ? body.comment.trim() : ''
 
-    if (!mongoose.Types.ObjectId.isValid(employeeId) || !validDate(periodStart)) {
-      return NextResponse.json({ error: 'A valid employee and week start date are required' }, { status: 400 })
+    if (!mongoose.Types.ObjectId.isValid(employeeId) || !mongoose.Types.ObjectId.isValid(projectId) || !validDate(periodStart)) {
+      return NextResponse.json({ error: 'A valid employee, project, and week start date are required' }, { status: 400 })
     }
     const weekStart = new Date(`${periodStart}T00:00:00.000Z`)
     if (weekStart.getUTCDay() !== 1) {
       return NextResponse.json({ error: 'Choose a Monday as the week start date' }, { status: 400 })
     }
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-      return NextResponse.json({ error: 'Performance mark must be between 1 and 5' }, { status: 400 })
-    }
-    if (!comment) {
-      return NextResponse.json({ error: 'Add a comment with the weekly performance mark' }, { status: 400 })
+    if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
+      return NextResponse.json({ error: 'Performance rating must be between 1 and 10' }, { status: 400 })
     }
 
     const employee = await Employee.findOne({ _id: employeeId, role: 'Employee' }).select('_id')
     if (!employee) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
     }
-    if (projectId !== 'all') {
-      if (!mongoose.Types.ObjectId.isValid(projectId) || !(await Project.exists({ _id: projectId }))) {
-        return NextResponse.json({ error: 'Selected project does not exist' }, { status: 400 })
-      }
-      const employeeIsAssigned = await Employee.exists({ _id: employeeId, assignedProjects: projectId })
-      const employeeHasProjectWork = Boolean(
-        await Task.exists({ projectId, assignedEmployeeIds: employeeId }) ||
-        await DailyEntry.exists({ projectId, employeeId })
-      )
-      if (!employeeIsAssigned && !employeeHasProjectWork) {
-        return NextResponse.json({ error: 'Employee has no assigned work in the selected project' }, { status: 400 })
-      }
+    if (!(await Project.exists({ _id: projectId }))) {
+      return NextResponse.json({ error: 'Selected project does not exist' }, { status: 400 })
+    }
+    const employeeIsAssigned = await Employee.exists({ _id: employeeId, assignedProjects: projectId })
+    const employeeHasProjectWork = Boolean(
+      await Task.exists({ projectId, assignedEmployeeIds: employeeId }) ||
+      await DailyEntry.exists({ projectId, employeeId })
+    )
+    if (!employeeIsAssigned && !employeeHasProjectWork) {
+      return NextResponse.json({ error: 'Employee has no assigned work in the selected project' }, { status: 400 })
     }
 
     const periodEnd = getWeekEnd(periodStart)
-    const mark = await PerformanceMark.findOneAndUpdate(
-      { employeeId, projectId, periodStart },
-      {
-        $set: {
-          periodEnd,
-          rating,
-          comment,
-          directorId: user._id.toString(),
-          updatedAt: new Date()
-        },
-        $setOnInsert: { employeeId, projectId, periodStart, createdAt: new Date() }
-      },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
-    )
+    const mark = await PerformanceMark.create({
+      employeeId,
+      projectId,
+      periodStart,
+      periodEnd,
+      rating,
+      ratingScale: 10,
+      comment,
+      directorId: user._id.toString()
+    })
     return NextResponse.json(mark)
   } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 11000) {
+      return NextResponse.json({ error: 'A weekly rating already exists for this employee, project, and week' }, { status: 409 })
+    }
     console.error('Performance marks POST error:', error)
     return NextResponse.json({ error: 'Failed to save weekly performance mark' }, { status: 500 })
   }

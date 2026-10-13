@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react';
-import { Employee, UserRole, EmployeeStatus } from '../types';
+import { Employee, EmployeeStatus, Project, UserRole } from '../types';
 import { X, Save, AlertCircle, Key } from 'lucide-react';
 
 interface EmployeeModalProps {
@@ -10,7 +10,8 @@ interface EmployeeModalProps {
   onClose: () => void;
   onSave: (employeeData: any) => Promise<void>;
   onDelete?: (employeeId: string) => void;
-  projects?: any[];
+  projects?: Project[];
+  employees?: Employee[];
   tasks?: any[];
   preventDeactivation?: boolean;
 }
@@ -23,6 +24,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  projects = [],
+  employees = [],
   preventDeactivation = false
 }) => {
   const [firstName, setFirstName] = useState('');
@@ -31,6 +34,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('Employee');
   const [status, setStatus] = useState<EmployeeStatus>('Active');
+  const [assignedProjects, setAssignedProjects] = useState<string[]>([]);
+  const [assignedEmployees, setAssignedEmployees] = useState<string[]>([]);
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,6 +51,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setPhone(employee.phone || '');
       setRole(employee.role || 'Employee');
       setStatus(employee.status || 'Active');
+      setAssignedProjects(employee.assignedProjects || []);
+      setAssignedEmployees(employee.assignedEmployees || []);
       setPassword('');
       setNewPassword('');
     } else {
@@ -55,6 +62,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setPhone('');
       setRole('Employee');
       setStatus('Active');
+      setAssignedProjects([]);
+      setAssignedEmployees([]);
       setPassword('password'); // Default initial password
       setNewPassword('');
     }
@@ -86,7 +95,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
         email: email.trim(),
         phone: phone.trim(),
         role,
-        status
+        status,
+        ...(role === 'Project Head' ? { assignedProjects, assignedEmployees } : {})
       };
 
       if (!employee) {
@@ -104,9 +114,20 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
     }
   };
 
+  const activeEmployees = employees.filter(
+    candidate => candidate.role === 'Employee' && candidate.status === 'Active'
+  );
+  const toggleAssignment = (
+    id: string,
+    current: string[],
+    setSelected: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    setSelected(current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
+      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
@@ -119,7 +140,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
           
           {error && (
             <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium">
@@ -204,6 +225,65 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
               )}
             </div>
           </div>
+
+          {role === 'Project Head' && (
+            <section className="space-y-4 rounded-lg border border-indigo-100 bg-indigo-50/60 p-4" aria-label="Project Head access">
+              <div>
+                <h4 className="text-sm font-bold text-slate-800">Project Head Access</h4>
+                <p className="mt-1 text-xs text-slate-600">
+                  Choose which projects this Project Head can manage and which active employees they can assign tasks to.
+                </p>
+              </div>
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Projects ({assignedProjects.length} selected)
+                </legend>
+                <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2">
+                  {projects.length === 0 ? (
+                    <p className="px-1 py-2 text-xs text-slate-500">Create projects before assigning access.</p>
+                  ) : projects.map(project => {
+                    const id = String(project.id || project._id || '');
+                    if (!id) return null;
+                    return (
+                      <label key={id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-xs text-slate-700 hover:bg-indigo-50">
+                        <input
+                          type="checkbox"
+                          checked={assignedProjects.includes(id)}
+                          onChange={() => toggleAssignment(id, assignedProjects, setAssignedProjects)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>{project.projectNumber} - {project.projectName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Active Employees ({assignedEmployees.length} selected)
+                </legend>
+                <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2">
+                  {activeEmployees.length === 0 ? (
+                    <p className="px-1 py-2 text-xs text-slate-500">No active employees available.</p>
+                  ) : activeEmployees.map(candidate => {
+                    const id = String(candidate.id || candidate._id || '');
+                    if (!id) return null;
+                    return (
+                      <label key={id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-xs text-slate-700 hover:bg-indigo-50">
+                        <input
+                          type="checkbox"
+                          checked={assignedEmployees.includes(id)}
+                          onChange={() => toggleAssignment(id, assignedEmployees, setAssignedEmployees)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>{candidate.firstName} {candidate.lastName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </section>
+          )}
 
           {!employee ? (
             <div>
