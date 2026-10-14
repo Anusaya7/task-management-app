@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
+import { normalizeEmployeeStatus } from '@/lib/employeeStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,7 @@ export async function GET(req: Request) {
         name: `${user.firstName} ${user.lastName}`,
         email: user.email,
         role: user.role,
-        status: user.status,
+        status: normalizeEmployeeStatus(user.status),
         phone: user.phone,
         assignedProjects: user.assignedProjects || [],
         assignedEmployees: user.assignedEmployees || []

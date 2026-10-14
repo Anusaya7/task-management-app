@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '../../../../lib/mongodb'
 import Employee from '../../../../models/Employee'
-import { comparePassword, signToken } from '../../../../lib/auth'
+import { comparePassword, ensureDirectorAccountsActive, signToken } from '../../../../lib/auth'
 import { seedDatabase } from '../../../../lib/seed'
+import { canAccountLogin, isDirectorRole, isInactiveEmployee, normalizeEmployeeStatus } from '../../../../lib/employeeStatus'
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,6 +17,12 @@ export async function POST(request: NextRequest) {
       }
     } catch (seedErr) {
       console.warn('Auto-seed check skipped or failed:', seedErr)
+    }
+
+    try {
+      await ensureDirectorAccountsActive()
+    } catch (directorFixErr) {
+      console.warn('Director account reactivation skipped or failed:', directorFixErr)
     }
 
     const body = await request.json()
@@ -35,10 +42,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
     }
 
-    if (user.status === 'Inactive') {
-      return NextResponse.json({ error: 'Account is inactive. Please contact Director.' }, { status: 403 })
-    }
-
     let isValid = false
     if (user.passwordHash) {
       isValid = await comparePassword(password, user.passwordHash)
@@ -49,6 +52,15 @@ export async function POST(request: NextRequest) {
 
     if (!isValid) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
+    }
+
+    if (!canAccountLogin(user.role, user.status)) {
+      return NextResponse.json({ error: 'Account is inactive. Please contact Director.' }, { status: 403 })
+    }
+
+    if (isDirectorRole(user.role) && isInactiveEmployee(user.status)) {
+      user.status = 'Active'
+      await user.save()
     }
 
     const payload = {
@@ -66,6 +78,7 @@ export async function POST(request: NextRequest) {
       id: userObj._id.toString(),
       _id: userObj._id.toString(),
       name: `${user.firstName} ${user.lastName}`,
+      status: normalizeEmployeeStatus(user.status),
       password: undefined,
       passwordHash: undefined
     }
@@ -88,14 +101,6 @@ export async function POST(request: NextRequest) {
     return response
   } catch (error: any) {
     console.error('Employees login API error:', error)
-    const errorMsg = error?.message || 'Internal server error'
-    if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('Mongo') || errorMsg.includes('connect')) {
-      return NextResponse.json({
-        error: process.env.VERCEL
-          ? 'Database connection error. Please verify MONGODB_URI in Vercel Production Environment Variables.'
-          : 'Database connection error. Please verify MONGODB_URI in .env.local.'
-      }, { status: 500 })
-    }
-    return NextResponse.json({ error: errorMsg }, { status: 500 })
+    return NextResponse.json({ error: 'Login service is temporarily unavailable.' }, { status: 500 })
   }
 }

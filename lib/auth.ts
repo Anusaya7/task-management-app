@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import { cookies } from 'next/headers'
 import connectToDatabase from './mongodb'
 import Employee, { IEmployee } from '@/models/Employee'
+import { isDirectorRole, isInactiveEmployee } from './employeeStatus'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'taskmanager_phase1_super_secret_key_2026'
 
@@ -56,9 +57,24 @@ export async function getAuthUser(req?: Request): Promise<IEmployee | null> {
   await connectToDatabase()
 
   const user = await Employee.findById(decoded.id)
-  if (!user || user.status === 'Inactive') return null
+  if (!user) return null
+
+  if (isDirectorRole(user.role) && isInactiveEmployee(user.status)) {
+    user.status = 'Active'
+    await user.save()
+    return user
+  }
+
+  if (isInactiveEmployee(user.status)) return null
 
   return user
+}
+
+export async function ensureDirectorAccountsActive(): Promise<void> {
+  await Employee.updateMany(
+    { role: 'Director', status: { $nin: ['Active', 'Absent'] } },
+    { $set: { status: 'Active', updatedAt: new Date() } }
+  )
 }
 
 // Return date string in Asia/Kolkata timezone (YYYY-MM-DD)

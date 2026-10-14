@@ -6,6 +6,7 @@ import Project from '@/models/Project'
 import Employee from '@/models/Employee'
 import PrivateRating from '@/models/PrivateRating'
 import { getAuthUser, getTodayKolkata } from '@/lib/auth'
+import { normalizeEmployeeStatus } from '@/lib/employeeStatus'
 import { sendNotifications } from '@/lib/notifications'
 import { ensureAssigneeProgress, serializeTaskWithAssignees } from '@/lib/assigneeProgress'
 import { ensureTaskCodes } from '@/lib/hierarchyCodes'
@@ -180,10 +181,11 @@ export async function POST(req: Request) {
       }
       const employeeDocs = await Employee.find({
         _id: { $in: requested },
-        role: 'Employee',
-        status: 'Active'
+        role: 'Employee'
       }).select('_id firstName lastName')
-      validAssignees = employeeDocs.map(emp => emp._id.toString())
+      validAssignees = employeeDocs
+        .filter(emp => normalizeEmployeeStatus(emp.status) === 'Active')
+        .map(emp => emp._id.toString())
       if (validAssignees.length !== requested.length) {
         return NextResponse.json({ error: 'Project Head can only assign tasks to active employees in their scope.' }, { status: 400 })
       }

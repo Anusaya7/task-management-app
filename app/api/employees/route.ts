@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import Employee from '@/models/Employee'
 import { getAuthUser, hashPassword } from '@/lib/auth'
+import { normalizeEmployeeStatus, parseEmployeeStatus } from '@/lib/employeeStatus'
 
 export async function GET(req: Request) {
   try {
@@ -16,15 +17,20 @@ export async function GET(req: Request) {
 
     const serialize = (docs: any[]) => docs.map((doc) => {
       const obj = doc.toObject()
-      return { ...obj, id: obj._id.toString() }
+      return {
+        ...obj,
+        id: obj._id.toString(),
+        status: normalizeEmployeeStatus(obj.status)
+      }
     })
 
     if (directory === 'assignees') {
       const people = await Employee.find({
-        status: 'Active',
         role: { $in: ['Employee', 'Director', 'Project Head'] }
       }).select('_id firstName lastName role status').sort({ firstName: 1 })
-      return NextResponse.json(serialize(people))
+      return NextResponse.json(serialize(
+        people.filter(person => normalizeEmployeeStatus(person.status) === 'Active')
+      ))
     }
 
     if (user.role === 'Director') {
@@ -69,6 +75,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'First Name, Last Name, Email, and Password are required' }, { status: 400 })
     }
 
+    const accountRole = role || 'Employee'
+    if (!['Director', 'Project Head', 'Employee'].includes(accountRole)) {
+      return NextResponse.json({ error: 'A valid account role is required' }, { status: 400 })
+    }
+    const initialStatus = status === undefined || status === null || status === ''
+      ? 'Active'
+      : parseEmployeeStatus(status)
+    if (!initialStatus) {
+      return NextResponse.json({ error: 'Status must be Active, Absent, or Inactive' }, { status: 400 })
+    }
+
     const cleanEmail = email.toLowerCase().trim()
     const existing = await Employee.findOne({ email: cleanEmail })
     if (existing) {
@@ -82,8 +99,8 @@ export async function POST(req: Request) {
       lastName: lastName.trim(),
       email: cleanEmail,
       phone: phone ? phone.trim() : '',
-      role: role || 'Employee',
-      status: status || 'Active',
+      role: accountRole,
+      status: initialStatus,
       passwordHash,
       assignedProjects: assignedProjects || [],
       assignedEmployees: assignedEmployees || []

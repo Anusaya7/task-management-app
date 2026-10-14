@@ -4,6 +4,7 @@ import Employee from '@/models/Employee'
 import Attendance from '@/models/Attendance'
 import Project from '@/models/Project'
 import { getAuthUser, hashPassword, getTodayKolkata } from '@/lib/auth'
+import { isInactiveEmployee, normalizeEmployeeStatus, parseEmployeeStatus } from '@/lib/employeeStatus'
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -29,7 +30,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     }
 
-    return NextResponse.json(emp)
+    const result = emp.toObject()
+    result.status = normalizeEmployeeStatus(result.status)
+    return NextResponse.json(result)
   } catch (error: any) {
     console.error('Employee GET by ID error:', error)
     return NextResponse.json({ error: 'Failed to fetch employee' }, { status: 500 })
@@ -49,23 +52,30 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 
     await connectToDatabase()
     const body = await req.json()
+    const hasStatus = Object.prototype.hasOwnProperty.call(body, 'status')
+    const requestedStatus = hasStatus ? parseEmployeeStatus(body.status) : null
+    if (hasStatus && !requestedStatus) {
+      return NextResponse.json({ error: 'Status must be Active, Absent, or Inactive' }, { status: 400 })
+    }
     const emp = await Employee.findById(params.id)
     if (!emp) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
     }
 
     const removesAvailableDirector = emp.role === 'Director' &&
-      (body.status === 'Inactive' || (body.role && body.role !== 'Director'))
+      (requestedStatus === 'Inactive' || (body.role && body.role !== 'Director'))
     if (removesAvailableDirector) {
-      if (body.status === 'Inactive' && emp._id.toString() === user._id.toString()) {
+      if (requestedStatus === 'Inactive' && emp._id.toString() === user._id.toString()) {
         return NextResponse.json({ error: 'You cannot deactivate your own Director account.' }, { status: 409 })
       }
 
-      const remainingDirectors = await Employee.countDocuments({
+      const otherDirectors = await Employee.find({
         role: 'Director',
-        status: { $ne: 'Inactive' },
         _id: { $ne: emp._id }
-      })
+      }).select('status')
+      const remainingDirectors = otherDirectors.filter(director =>
+        !isInactiveEmployee(director.status)
+      ).length
       if (remainingDirectors === 0) {
         return NextResponse.json({ error: 'At least one available Director account must remain.' }, { status: 409 })
       }
@@ -109,21 +119,25 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         return NextResponse.json({ error: 'Employee IDs must be valid strings.' }, { status: 400 })
       }
       const uniqueEmployeeIds: string[] = Array.from(new Set<string>(employeeIds))
-      const activeEmployees = await Employee.countDocuments({
+      const assignedEmployeeRecords = await Employee.find({
         _id: { $in: uniqueEmployeeIds },
-        role: 'Employee',
-        status: 'Active'
-      })
-      if (activeEmployees !== uniqueEmployeeIds.length) {
+        role: 'Employee'
+      }).select('_id status')
+      const activeEmployeeIds = new Set(
+        assignedEmployeeRecords
+          .filter(employee => normalizeEmployeeStatus(employee.status) === 'Active')
+          .map(employee => employee._id.toString())
+      )
+      if (activeEmployeeIds.size !== uniqueEmployeeIds.length) {
         return NextResponse.json({ error: 'Project Heads can only be assigned existing active employees.' }, { status: 400 })
       }
       emp.assignedEmployees = uniqueEmployeeIds
     }
 
-    if (body.status && body.status !== emp.status) {
-      emp.status = body.status
+    if (requestedStatus && requestedStatus !== emp.status) {
+      emp.status = requestedStatus
       // Record attendance event if status changed to Absent
-      if (body.status === 'Absent') {
+      if (requestedStatus === 'Absent') {
         const today = getTodayKolkata()
         await Attendance.create({
           employeeId: emp._id.toString(),
@@ -145,6 +159,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 
     const result = emp.toObject()
     delete (result as any).passwordHash
+    result.status = normalizeEmployeeStatus(result.status)
 
     return NextResponse.json(result)
   } catch (error: any) {
@@ -176,11 +191,13 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
         return NextResponse.json({ error: 'You cannot deactivate your own Director account.' }, { status: 409 })
       }
 
-      const remainingDirectors = await Employee.countDocuments({
+      const otherDirectors = await Employee.find({
         role: 'Director',
-        status: { $ne: 'Inactive' },
         _id: { $ne: emp._id }
-      })
+      }).select('status')
+      const remainingDirectors = otherDirectors.filter(director =>
+        !isInactiveEmployee(director.status)
+      ).length
       if (remainingDirectors === 0) {
         return NextResponse.json({ error: 'At least one available Director account must remain.' }, { status: 409 })
       }

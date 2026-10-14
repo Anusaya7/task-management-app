@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import connectToDatabase from '@/lib/mongodb'
 import Employee from '@/models/Employee'
-import { comparePassword, signToken } from '@/lib/auth'
+import { comparePassword, ensureDirectorAccountsActive, signToken } from '@/lib/auth'
 import { seedDatabase } from '@/lib/seed'
+import { canAccountLogin, isDirectorRole, isInactiveEmployee, normalizeEmployeeStatus } from '@/lib/employeeStatus'
 
 export async function POST(req: Request) {
   try {
@@ -23,15 +24,17 @@ export async function POST(req: Request) {
       console.warn('Auto-seed check skipped or failed:', seedErr)
     }
 
+    try {
+      await ensureDirectorAccountsActive()
+    } catch (directorFixErr) {
+      console.warn('Director account reactivation skipped or failed:', directorFixErr)
+    }
+
     const cleanEmail = email.toLowerCase().trim()
     const user = await Employee.findOne({ email: cleanEmail })
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
-    }
-
-    if (user.status === 'Inactive') {
-      return NextResponse.json({ error: 'Account is inactive. Please contact Director.' }, { status: 403 })
     }
 
     let isValid = false
@@ -44,6 +47,15 @@ export async function POST(req: Request) {
 
     if (!isValid) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
+    }
+
+    if (!canAccountLogin(user.role, user.status)) {
+      return NextResponse.json({ error: 'Account is inactive. Please contact Director.' }, { status: 403 })
+    }
+
+    if (isDirectorRole(user.role) && isInactiveEmployee(user.status)) {
+      user.status = 'Active'
+      await user.save()
     }
 
     const payload = {
@@ -66,7 +78,7 @@ export async function POST(req: Request) {
         name: `${user.firstName} ${user.lastName}`,
         email: user.email,
         role: user.role,
-        status: user.status,
+        status: normalizeEmployeeStatus(user.status),
         phone: user.phone
       }
     })
@@ -82,14 +94,6 @@ export async function POST(req: Request) {
     return response
   } catch (error: any) {
     console.error('Login API error:', error)
-    const errorMsg = error?.message || 'Internal server error'
-    if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('Mongo') || errorMsg.includes('connect')) {
-      return NextResponse.json({
-        error: process.env.VERCEL
-          ? 'Database connection error. Please verify MONGODB_URI in Vercel Production Environment Variables.'
-          : 'Database connection error. Please verify MONGODB_URI in .env.local.'
-      }, { status: 500 })
-    }
-    return NextResponse.json({ error: errorMsg }, { status: 500 })
+    return NextResponse.json({ error: 'Login service is temporarily unavailable.' }, { status: 500 })
   }
 }

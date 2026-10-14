@@ -6,6 +6,7 @@ import Reminder from '@/models/Reminder'
 import Attendance from '@/models/Attendance'
 import Employee from '@/models/Employee'
 import { getTodayKolkata } from '@/lib/auth'
+import { normalizeEmployeeStatus } from '@/lib/employeeStatus'
 
 export async function POST(req: Request) {
   try {
@@ -13,7 +14,8 @@ export async function POST(req: Request) {
     const today = getTodayKolkata()
 
     // 1. Process Un-updated Tasks for Active Employees
-    const activeEmployees = await Employee.find({ status: 'Active', role: 'Employee' })
+    const activeEmployees = (await Employee.find({ role: 'Employee' }))
+      .filter(employee => normalizeEmployeeStatus(employee.status) === 'Active')
     let notUpdatedCount = 0
 
     for (const emp of activeEmployees) {

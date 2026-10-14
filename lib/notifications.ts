@@ -2,6 +2,7 @@ import connectToDatabase from './mongodb'
 import Notification from '@/models/Notification'
 import Employee from '@/models/Employee'
 import Project from '@/models/Project'
+import { normalizeEmployeeStatus } from './employeeStatus'
 
 interface CreateNotificationParams {
   recipientUserId?: string
@@ -30,16 +31,18 @@ export async function sendNotifications(params: CreateNotificationParams) {
     if (params.recipientRoles && params.recipientRoles.length > 0) {
       // Find Directors if requested
       if (params.recipientRoles.includes('Director')) {
-        const directors = await Employee.find({ role: 'Director', status: 'Active' }).select('_id')
-        directors.forEach(d => recipientUserIds.add(d._id.toString()))
+        const directors = await Employee.find({ role: 'Director' }).select('_id status')
+        directors
+          .filter(director => normalizeEmployeeStatus(director.status) === 'Active')
+          .forEach(director => recipientUserIds.add(director._id.toString()))
       }
 
       // Find Project Heads responsible for this project or employee if requested
       if (params.recipientRoles.includes('Project Head')) {
-        let phQuery: any = { role: 'Project Head', status: 'Active' }
-        const phs = await Employee.find(phQuery)
+        const phs = await Employee.find({ role: 'Project Head' })
 
         phs.forEach(ph => {
+          if (normalizeEmployeeStatus(ph.status) !== 'Active') return
           let isResponsible = false
 
           if (params.projectId && ph.assignedProjects && ph.assignedProjects.includes(params.projectId)) {
