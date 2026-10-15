@@ -393,7 +393,10 @@ export async function GET(req: Request) {
           freeHours: customMetrics.freeHours,
           marking: customMetrics.marking,
           dayWise: customMetrics.dayWise
-        }
+        },
+        // Convenience top-level fields so the default (custom) range is always numeric.
+        workHours: customMetrics.workHours,
+        freeHours: customMetrics.freeHours
       })
     }
 

@@ -8,6 +8,10 @@ export interface IEmployee extends Document {
   passwordHash: string
   role: 'Director' | 'Project Head' | 'Employee'
   status: 'Active' | 'Absent' | 'Inactive'
+  position?: string
+  department?: string
+  joiningDate?: string
+  dateOfBirth?: string
   assignedProjects?: string[]
   assignedEmployees?: string[]
   createdAt: Date
@@ -16,9 +20,9 @@ export interface IEmployee extends Document {
 
 const employeeSchema = new Schema<IEmployee>({
   firstName: { type: String, required: true },
-  lastName: { type: String, required: true },
+  lastName: { type: String, required: false, default: '' },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-  phone: { type: String, required: true },
+  phone: { type: String, required: false, default: '' },
   passwordHash: { type: String, required: true },
   role: { 
     type: String, 
@@ -32,11 +36,15 @@ const employeeSchema = new Schema<IEmployee>({
     required: true,
     default: 'Active' 
   },
+  position: { type: String, default: '' },
+  department: { type: String, default: '' },
+  joiningDate: { type: String, default: '' },
+  dateOfBirth: { type: String, default: '' },
   assignedProjects: [{ type: String }],
   assignedEmployees: [{ type: String }],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
-})
+}, { strict: false })
 
 if (mongoose.models.Employee) {
   mongoose.deleteModel('Employee')

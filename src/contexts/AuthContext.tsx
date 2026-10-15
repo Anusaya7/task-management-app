@@ -128,7 +128,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     void checkAuth();
     const failSafe = setTimeout(() => setLoading(false), AUTH_CHECK_TIMEOUT_MS + 500);
-    return () => clearTimeout(failSafe);
+    const refreshVisibleSession = () => {
+      if (document.visibilityState === 'visible') void checkAuth();
+    };
+    const refreshInterval = setInterval(() => void checkAuth(), 60_000);
+    window.addEventListener('focus', refreshVisibleSession);
+    document.addEventListener('visibilitychange', refreshVisibleSession);
+    return () => {
+      clearTimeout(failSafe);
+      clearInterval(refreshInterval);
+      window.removeEventListener('focus', refreshVisibleSession);
+      document.removeEventListener('visibilitychange', refreshVisibleSession);
+    };
   }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> => {

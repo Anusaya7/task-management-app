@@ -25,6 +25,41 @@ body {
   color: #0f172a;
 }
 
+/* Accessibility: visible keyboard focus ring everywhere */
+:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Slim, unobtrusive scrollbars on data-heavy tables */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

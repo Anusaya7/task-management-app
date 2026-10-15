@@ -58,6 +58,10 @@ export interface Employee {
   status: EmployeeStatus;
   assignedProjects?: string[]; // IDs of assigned projects for Project Head
   assignedEmployees?: string[]; // IDs of allowed employees for Project Head
+  position?: string;
+  department?: string;
+  joiningDate?: string;
+  dateOfBirth?: string;
   createdAt?: string;
   updatedAt?: string;
 }

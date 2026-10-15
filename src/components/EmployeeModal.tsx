@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Employee, EmployeeStatus, Project, UserRole } from '../types';
-import { X, Save, AlertCircle, Key } from 'lucide-react';
+import { X, Save, AlertCircle, Key, UserX } from 'lucide-react';
 
 interface EmployeeModalProps {
   employee?: Employee | null;
@@ -24,6 +24,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onDelete,
   projects = [],
   employees = [],
   preventDeactivation = false
@@ -40,6 +41,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -68,6 +70,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setNewPassword('');
     }
     setError('');
+    setConfirmDeactivate(false);
   }, [isOpen, employee?.id || (employee as any)?._id]);
 
   if (!isOpen) return null;
@@ -128,7 +131,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <h3 className="text-lg font-bold text-slate-800">
@@ -141,7 +144,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
-          
+
           {error && (
             <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium">
               <AlertCircle size={16} />
@@ -314,22 +317,64 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-lg shadow-sm transition disabled:opacity-60"
-            >
-              <Save size={16} />
-              <span>{isSubmitting ? 'Saving...' : 'Save Employee'}</span>
-            </button>
+          <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-200">
+            {/* Deactivate (soft delete) — only for existing employees, with a two-step inline confirmation */}
+            {employee && onDelete && (
+              <div>
+                {confirmDeactivate ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-rose-700">Deactivate this account?</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const empId = String(employee.id || (employee as any)?._id || '');
+                        if (!empId) return;
+                        onDelete(empId);
+                        onClose();
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+                    >
+                      Yes, Deactivate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeactivate(false)}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeactivate(true)}
+                    disabled={preventDeactivation}
+                    title={preventDeactivation ? 'At least one Director account must stay available.' : undefined}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+                  >
+                    <UserX size={16} />
+                    <span>Deactivate</span>
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-lg shadow-sm transition disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+              >
+                <Save size={16} />
+                <span>{isSubmitting ? 'Saving...' : 'Save Employee'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

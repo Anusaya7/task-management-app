@@ -53,7 +53,18 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 
     const previousProjectName = project.projectName
     if (body.projectName) project.projectName = body.projectName.trim()
-    if (body.projectNumber) project.projectNumber = body.projectNumber.trim()
+    if (body.projectNumber) {
+      const nextNumber = String(body.projectNumber).trim()
+      // Keep project numbers unique, but allow saving without changing the current number.
+      const duplicate = await Project.findOne({
+        projectNumber: nextNumber,
+        _id: { $ne: project._id }
+      }).select('_id')
+      if (duplicate) {
+        return NextResponse.json({ error: `Project Number '${nextNumber}' is already used by another project.` }, { status: 409 })
+      }
+      project.projectNumber = nextNumber
+    }
     if (body.location !== undefined) project.location = body.location.trim()
     if (body.description) project.description = body.description.trim()
     if (body.contactDetails !== undefined) project.contactDetails = body.contactDetails.trim()

@@ -25,7 +25,7 @@ async function canConnect(uri) {
   try {
     const conn = await mongoose.createConnection(uri, {
       bufferCommands: false,
-      serverSelectionTimeoutMS: 8000,
+      serverSelectionTimeoutMS: 2500,
     }).asPromise()
     await conn.close()
     return true
@@ -37,7 +37,7 @@ async function canConnect(uri) {
 async function startLocalMongo() {
   const { MongoMemoryServer } = require('mongodb-memory-server')
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  console.log('Atlas is unreachable. Starting a local MongoDB for development...')
+  console.log('Starting local MongoDB for development...')
   const mongod = await MongoMemoryServer.create({
     instance: {
       dbName: 'taskmanager',
@@ -50,16 +50,19 @@ async function startLocalMongo() {
 
 async function main() {
   const fileEnv = loadEnvLocal()
-  const atlasUri = process.env.MONGODB_URI || fileEnv.MONGODB_URI
+  const configuredUri = process.env.MONGODB_URI || fileEnv.MONGODB_URI || 'mongodb://127.0.0.1:27017/taskmanager'
   let mongoServer = null
-  let mongoUri = atlasUri
+  let mongoUri = configuredUri
 
-  if (await canConnect(atlasUri)) {
-    console.log('Using MongoDB Atlas from MONGODB_URI')
+  if (await canConnect(configuredUri)) {
+    console.log('Connected to MongoDB from URI:', configuredUri)
+  } else if (await canConnect('mongodb://127.0.0.1:27017/taskmanager')) {
+    mongoUri = 'mongodb://127.0.0.1:27017/taskmanager'
+    console.log('Using local MongoDB on port 27017')
   } else {
     mongoServer = await startLocalMongo()
     mongoUri = mongoServer.getUri('taskmanager')
-    console.log('Using local MongoDB for development')
+    console.log('Using local MongoDB instance for development')
   }
 
   const env = {
@@ -70,7 +73,7 @@ async function main() {
 
   const child = spawn(
     process.execPath,
-    ['--max-old-space-size=4096', path.join('node_modules', 'next', 'dist', 'bin', 'next'), 'dev'],
+    ['--max-old-space-size=4096', path.join('node_modules', 'next', 'dist', 'bin', 'next'), 'dev', ...process.argv.slice(2)],
     { cwd: ROOT, env, stdio: 'inherit' }
   )
 

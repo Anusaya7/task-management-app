@@ -82,8 +82,12 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     }
 
     if (body.firstName) emp.firstName = body.firstName.trim()
-    if (body.lastName) emp.lastName = body.lastName.trim()
+    if (body.lastName !== undefined) emp.lastName = body.lastName.trim()
     if (body.phone !== undefined) emp.phone = body.phone.trim()
+    if (body.position !== undefined) (emp as any).position = String(body.position).trim()
+    if (body.department !== undefined) (emp as any).department = String(body.department).trim()
+    if (body.joiningDate !== undefined) (emp as any).joiningDate = String(body.joiningDate).trim()
+    if (body.dateOfBirth !== undefined) (emp as any).dateOfBirth = String(body.dateOfBirth).trim()
     if (body.role) emp.role = body.role
     if (body.role && body.role !== 'Project Head') {
       emp.assignedProjects = []

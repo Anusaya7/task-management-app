@@ -68,6 +68,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Project Name, Project Number, and Description are required' }, { status: 400 })
     }
 
+    // Project numbers must be unique so tasks never mix between projects.
+    const duplicateNumber = await Project.findOne({ projectNumber: String(projectNumber).trim() }).select('_id')
+    if (duplicateNumber) {
+      return NextResponse.json({ error: `Project Number '${String(projectNumber).trim()}' is already used by another project. Please choose a unique number.` }, { status: 409 })
+    }
+
     const today = getTodayKolkata()
     const remarks = (Array.isArray(projectRemarks) ? projectRemarks : [])
       .filter((item: any) => item && String(item.remark || '').trim())

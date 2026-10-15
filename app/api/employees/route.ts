@@ -96,11 +96,15 @@ export async function POST(req: Request) {
 
     const newEmp = await Employee.create({
       firstName: firstName.trim(),
-      lastName: lastName.trim(),
+      lastName: lastName ? lastName.trim() : '',
       email: cleanEmail,
       phone: phone ? phone.trim() : '',
       role: accountRole,
       status: initialStatus,
+      position: body.position ? String(body.position).trim() : '',
+      department: body.department ? String(body.department).trim() : '',
+      joiningDate: body.joiningDate ? String(body.joiningDate).trim() : '',
+      dateOfBirth: body.dateOfBirth ? String(body.dateOfBirth).trim() : '',
       passwordHash,
       assignedProjects: assignedProjects || [],
       assignedEmployees: assignedEmployees || []
