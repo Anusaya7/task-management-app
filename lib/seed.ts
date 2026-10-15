@@ -10,9 +10,19 @@ export async function seedDatabase() {
   const defaultPasswordHash = await hashPassword('password')
   const today = getTodayKolkata()
 
-  // Delete old requested employee accounts if present in DB
+  // Delete old requested/demo employee accounts if present in DB
   await Employee.deleteMany({
-    email: { $in: ['anushinde847@gmail.com', 'anil123@gmail.com', 'anilmisale123@gmail.com'] }
+    email: {
+      $in: [
+        'anushinde847@gmail.com',
+        'anil123@gmail.com',
+        'anilmisale123@gmail.com',
+        'admin@company.com',
+        'employee@company.com',
+        'mahesh@company.com',
+        'employee01@company.com'
+      ]
+    }
   })
 
   // 1. Seed Real Team Members
