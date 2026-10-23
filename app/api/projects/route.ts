@@ -55,23 +55,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Director & Project Head can create projects
-    if (user.role !== 'Director' && user.role !== 'Project Head') {
-      return NextResponse.json({ error: 'Forbidden: Only Director or Project Head can create projects' }, { status: 403 })
+    if (user.role !== 'Director') {
+      return NextResponse.json({ error: 'Forbidden: Only the Director can create projects' }, { status: 403 })
     }
 
     await connectToDatabase()
     const body = await req.json()
-    const { projectName, projectNumber, location, description, contactDetails, status, projectRemarks } = body
+    const { projectName, projectNumber, location, description, startDate, contactDetails, status, projectRemarks } = body
+    const normalizedProjectNumber = typeof projectNumber === 'string' && projectNumber.trim()
+      ? projectNumber.trim()
+      : `PRJ-${Date.now()}`
 
-    if (!projectName || !projectNumber || !description) {
-      return NextResponse.json({ error: 'Project Name, Project Number, and Description are required' }, { status: 400 })
+    if (!projectName || !location || !description) {
+      return NextResponse.json({ error: 'Project Name, Location, and Description are required' }, { status: 400 })
     }
 
     // Project numbers must be unique so tasks never mix between projects.
-    const duplicateNumber = await Project.findOne({ projectNumber: String(projectNumber).trim() }).select('_id')
+    const duplicateNumber = await Project.findOne({ projectNumber: normalizedProjectNumber }).select('_id')
     if (duplicateNumber) {
-      return NextResponse.json({ error: `Project Number '${String(projectNumber).trim()}' is already used by another project. Please choose a unique number.` }, { status: 409 })
+      return NextResponse.json({ error: `Project Number '${normalizedProjectNumber}' is already used by another project. Please choose a unique number.` }, { status: 409 })
     }
 
     const today = getTodayKolkata()
@@ -88,21 +90,14 @@ export async function POST(req: Request) {
 
     const newProject = await Project.create({
       projectName: projectName.trim(),
-      projectNumber: projectNumber.trim(),
+      projectNumber: normalizedProjectNumber,
       location: location ? location.trim() : '',
       description: description.trim(),
+      startDate: typeof startDate === 'string' ? startDate.trim() : '',
       contactDetails: contactDetails ? contactDetails.trim() : '',
       status: persistProjectStatus(status),
       projectRemarks: remarks
     })
-
-    // If Project Head created the project, add project ID to Project Head's assignedProjects scope
-    if (user.role === 'Project Head') {
-      const pId = newProject._id.toString()
-      await Employee.findByIdAndUpdate(user._id, {
-        $addToSet: { assignedProjects: pId }
-      })
-    }
 
     await ensureProjectCodes()
     const savedProject = (await Project.findById(newProject._id)) || newProject

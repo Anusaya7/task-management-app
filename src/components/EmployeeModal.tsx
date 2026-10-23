@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Employee, EmployeeStatus, Project, UserRole } from '../types';
-import { X, Save, AlertCircle, Key, UserX } from 'lucide-react';
+import { X, AlertCircle, Key, UserX } from 'lucide-react';
 
 interface EmployeeModalProps {
   employee?: Employee | null;
@@ -18,6 +18,7 @@ interface EmployeeModalProps {
 
 const ROLES: UserRole[] = ['Director', 'Project Head', 'Employee'];
 const STATUSES: EmployeeStatus[] = ['Active', 'Absent', 'Inactive'];
+const inputClassName = 'w-full rounded-md border border-[#FF2B2B] bg-white px-2 py-2 text-sm text-[#FF2B2B] outline-none transition focus:ring-2 focus:ring-[#FF2B2B]/20';
 
 const EmployeeModal: React.FC<EmployeeModalProps> = ({
   employee,
@@ -29,10 +30,10 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   employees = [],
   preventDeactivation = false
 }) => {
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [joiningDate, setJoiningDate] = useState('');
   const [role, setRole] = useState<UserRole>('Employee');
   const [status, setStatus] = useState<EmployeeStatus>('Active');
   const [assignedProjects, setAssignedProjects] = useState<string[]>([]);
@@ -47,10 +48,10 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
     if (!isOpen) return;
 
     if (employee) {
-      setFirstName(employee.firstName || '');
-      setLastName(employee.lastName || '');
+      setName(`${employee.firstName || ''} ${employee.lastName || ''}`.trim());
       setEmail(employee.email || '');
       setPhone(employee.phone || '');
+      setJoiningDate(employee.joiningDate || '');
       setRole(employee.role || 'Employee');
       setStatus(employee.status || 'Active');
       setAssignedProjects(employee.assignedProjects || []);
@@ -58,10 +59,15 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setPassword('');
       setNewPassword('');
     } else {
-      setFirstName('');
-      setLastName('');
+      setName('');
       setEmail('');
       setPhone('');
+      setJoiningDate(new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date()));
       setRole('Employee');
       setStatus('Active');
       setAssignedProjects([]);
@@ -79,8 +85,8 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
     e.preventDefault();
     setError('');
 
-    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
-      setError('First Name, Last Name, and Email are required.');
+    if (!name.trim() || !email.trim()) {
+      setError('Name and Email are required.');
       return;
     }
 
@@ -91,12 +97,16 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const nameParts = name.trim().split(/\s+/);
+      const unchangedName = employee &&
+        name.trim() === `${employee.firstName || ''} ${employee.lastName || ''}`.trim();
       const payload: any = {
         id: employee?.id || employee?._id,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        firstName: unchangedName && employee ? employee.firstName : nameParts[0],
+        lastName: unchangedName && employee ? employee.lastName : nameParts.slice(1).join(' '),
         email: email.trim(),
         phone: phone.trim(),
+        joiningDate,
         role,
         status,
         ...(role === 'Project Head' ? { assignedProjects, assignedEmployees } : {})
@@ -129,93 +139,91 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
-          <h3 className="text-lg font-bold text-slate-800">
-            {employee ? 'Edit Employee' : 'Add New Employee'}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-700/60 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-modal-title"
+        className="flex h-[580px] max-h-[calc(100dvh-32px)] w-full max-w-[940px] flex-col overflow-hidden rounded-md bg-white shadow-2xl"
+      >
+        <div className="flex min-h-[49px] items-center justify-between bg-[#1F4E79] px-5 py-3">
+          <h3 id="employee-modal-title" className="text-xl font-bold text-white">
+          {employee ? 'Edit (pop-up window)' : 'New Employee (pop-up window)'}
           </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close employee form"
+            className="rounded p-1 text-white transition hover:bg-white/10 focus-visible:outline-white"
+          >
             <X size={20} />
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
-
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-7 py-5">
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium">
+            <div className="mb-4 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
               <AlertCircle size={16} />
               <span>{error}</span>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">First Name *</label>
+              <label htmlFor="employee-name" className="mb-1 block text-sm font-semibold text-[#334155]">Name *</label>
               <input
+                id="employee-name"
                 type="text"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 required
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={inputClassName}
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Last Name *</label>
-              <input
-                type="text"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                required
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Email Address *</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Phone Number</label>
-            <input
-              type="text"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">System Role *</label>
+              <label htmlFor="employee-role" className="mb-1 block text-sm font-semibold text-[#334155]">Role *</label>
               <select
+                id="employee-role"
                 value={role}
                 onChange={(e) => setRole(e.target.value as UserRole)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={inputClassName}
               >
                 {ROLES.map(r => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={r}>{r === 'Project Head' ? 'Project Co-ordinator' : r}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Status *</label>
+              <label htmlFor="employee-email" className="mb-1 block text-sm font-semibold text-[#334155]">Email *</label>
+              <input
+                id="employee-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className={inputClassName}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="employee-phone" className="mb-1 block text-sm font-semibold text-[#334155]">Phone</label>
+              <input
+                id="employee-phone"
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className={inputClassName}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="employee-status" className="mb-1 block text-sm font-semibold text-[#334155]">Status *</label>
               <select
+                id="employee-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as EmployeeStatus)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={inputClassName}
               >
                 {STATUSES.map(s => (
                   <option key={s} value={s} disabled={s === 'Inactive' && preventDeactivation}>{s}</option>
@@ -226,6 +234,17 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   Keep at least one Director account available.
                 </p>
               )}
+            </div>
+
+            <div>
+              <label htmlFor="employee-joining-date" className="mb-1 block text-sm font-semibold text-[#334155]">Joining date</label>
+              <input
+                id="employee-joining-date"
+                type="date"
+                value={joiningDate}
+                onChange={event => setJoiningDate(event.target.value)}
+                className={inputClassName}
+              />
             </div>
           </div>
 
@@ -288,92 +307,81 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
             </section>
           )}
 
-          {!employee ? (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Initial Password *</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Reset Password (Leave blank to keep current)
-              </label>
-              <div className="relative">
+          {employee && (
+            <details className="mt-4 border-t border-slate-200 pt-3">
+              <summary className="cursor-pointer text-sm font-semibold text-[#334155]">Reset password</summary>
+              <div className="relative mt-3">
                 <input
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password..."
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Leave blank to keep current password"
+                  aria-label="New password"
+                  className={inputClassName}
                 />
                 <Key size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
               </div>
-            </div>
+            </details>
           )}
 
-          <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-200">
-            {/* Deactivate (soft delete) — only for existing employees, with a two-step inline confirmation */}
-            {employee && onDelete && (
-              <div>
-                {confirmDeactivate ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-rose-700">Deactivate this account?</span>
+          <div className="mt-auto pt-5">
+            <div className="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center">
+              {/* Deactivate (soft delete) — only for existing employees, with a two-step inline confirmation */}
+              {employee && onDelete && (
+                <div>
+                  {confirmDeactivate ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-rose-700">Deactivate this account?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const empId = String(employee.id || (employee as any)?._id || '');
+                          if (!empId) return;
+                          onDelete(empId);
+                          onClose();
+                        }}
+                        className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+                      >
+                        Yes, Deactivate
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeactivate(false)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        const empId = String(employee.id || (employee as any)?._id || '');
-                        if (!empId) return;
-                        onDelete(empId);
-                        onClose();
-                      }}
-                      className="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+                      onClick={() => setConfirmDeactivate(true)}
+                      disabled={preventDeactivation}
+                      title={preventDeactivation ? 'At least one Director account must stay available.' : undefined}
+                      className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
                     >
-                      Yes, Deactivate
+                      <UserX size={16} />
+                      <span>Deactivate</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeactivate(false)}
-                      className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDeactivate(true)}
-                    disabled={preventDeactivation}
-                    title={preventDeactivation ? 'At least one Director account must stay available.' : undefined}
-                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
-                  >
-                    <UserX size={16} />
-                    <span>Deactivate</span>
-                  </button>
-                )}
+                  )}
+                </div>
+              )}
+              <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="min-h-[46px] w-full rounded-md bg-[#16A34A] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#13883f] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 sm:max-w-[334px]"
+                >
+                  {isSubmitting ? 'Saving...' : 'Save Employee'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="min-h-[46px] w-full rounded-md bg-[#64748B] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#526176] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 sm:max-w-[158px]"
+                >
+                  Cancel
+                </button>
               </div>
-            )}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-lg shadow-sm transition disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-              >
-                <Save size={16} />
-                <span>{isSubmitting ? 'Saving...' : 'Save Employee'}</span>
-              </button>
             </div>
           </div>
         </form>

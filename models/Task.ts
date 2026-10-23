@@ -42,6 +42,7 @@ export interface ITask extends Document {
   flagStatus?: 'Open' | 'Resolved' | 'None'
   flagMessage?: string
   flagDate?: string
+  startDate?: string
   dueDate?: string
   parentTaskId?: string
   parentTaskTitle?: string
@@ -127,6 +128,7 @@ const taskSchema = new Schema<ITask>({
   flagStatus: { type: String, enum: ['Open', 'Resolved', 'None'], default: 'None' },
   flagMessage: { type: String },
   flagDate: { type: String },
+  startDate: { type: String },
   dueDate: { type: String },
   parentTaskId: { type: String },
   parentTaskTitle: { type: String },

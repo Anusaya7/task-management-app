@@ -140,7 +140,7 @@ export async function POST(req: Request) {
       .filter((taskId): taskId is string => typeof taskId === 'string' && /^[a-f\d]{24}$/i.test(taskId))
     const uniqueSubmittedTaskIds = Array.from(new Set(submittedTaskIds))
 
-    if (user.role === 'Employee' && uniqueSubmittedTaskIds.length !== submittedTaskIds.length) {
+    if (uniqueSubmittedTaskIds.length !== submittedTaskIds.length) {
       return NextResponse.json({ error: 'A task can only be added to Daily Entry once per day.' }, { status: 409 })
     }
 
@@ -173,6 +173,37 @@ export async function POST(req: Request) {
       }
     }
 
+    const linkedTasks = uniqueSubmittedTaskIds.length > 0
+      ? await Task.find({ _id: { $in: uniqueSubmittedTaskIds } })
+        .select('_id projectId assignedEmployeeIds projectHeadId')
+        .lean()
+      : []
+    if (linkedTasks.length !== uniqueSubmittedTaskIds.length) {
+      return NextResponse.json({ error: 'One or more selected tasks could not be found.' }, { status: 404 })
+    }
+
+    for (const item of entries) {
+      if (typeof item.taskId !== 'string' || !/^[a-f\d]{24}$/i.test(item.taskId)) continue
+      const linkedTask = linkedTasks.find(task => task._id.toString() === item.taskId)
+      if (!linkedTask) {
+        return NextResponse.json({ error: 'Selected task could not be found.' }, { status: 404 })
+      }
+      if (item.projectId && item.projectId !== linkedTask.projectId) {
+        return NextResponse.json({ error: 'Selected project does not match the task project.' }, { status: 400 })
+      }
+      if (user.role === 'Project Head') {
+        const allowedEmployees = user.assignedEmployees || []
+        const allowedProjects = user.assignedProjects || []
+        const canAccessTask = allowedProjects.includes(linkedTask.projectId) ||
+          linkedTask.projectHeadId === user._id.toString() ||
+          (linkedTask.assignedEmployeeIds || []).includes(user._id.toString()) ||
+          (linkedTask.assignedEmployeeIds || []).some(id => allowedEmployees.includes(id))
+        if (!canAccessTask) {
+          return NextResponse.json({ error: 'Forbidden: Task outside assigned project scope.' }, { status: 403 })
+        }
+      }
+    }
+
     // Validate entries
     let totalSubmittedHours = 0
     for (const item of entries) {
@@ -199,9 +230,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: parsedHours.error }, { status: 400 })
       }
       item._parsedHours = parsedHours.hours
-      if (item.flagged === undefined || item.flagged === null) {
-        return NextResponse.json({ error: 'Please select Flag before submitting.' }, { status: 400 })
-      }
       const selectedStatus = typeof item.status === 'string' ? item.status.trim() : ''
       if (selectedStatus !== 'In Progress' && selectedStatus !== 'Completed') {
         return NextResponse.json({ error: 'Please select task status before submitting.' }, { status: 400 })
@@ -225,6 +253,15 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'A task can only be added to Daily Entry once per day.' }, { status: 409 })
       }
 
+      const existingTaskEntryIds = new Set(
+        existingTodayEntries
+          .filter(entry => /^[a-f\d]{24}$/i.test(entry.taskId))
+          .map(entry => entry.taskId)
+      )
+      if (submittedTaskIds.some(taskId => existingTaskEntryIds.has(taskId))) {
+        return NextResponse.json({ error: 'This task already has a Daily Entry for today.' }, { status: 409 })
+      }
+
       const existingOfficeWorkKeys = new Set(
         existingTodayEntries
           .filter(entry => entry.taskId === 'OFFICE_WORK')
@@ -237,6 +274,11 @@ export async function POST(req: Request) {
 
     const existingTotalHours = existingTodayEntries.reduce((sum, e) => sum + (e.hours || 0), 0)
     const grandTotal = Number((existingTotalHours + totalSubmittedHours).toFixed(2))
+    if (grandTotal > 8) {
+      return NextResponse.json({
+        error: `Daily work cannot exceed 8 hours. ${existingTotalHours} hour(s) are already logged today.`
+      }, { status: 400 })
+    }
 
     const createdEntries = []
     for (const item of entries) {
@@ -284,6 +326,17 @@ export async function POST(req: Request) {
             )
             const aggregated = aggregateAssigneeProgress(task.assigneeProgress || [], task.status)
             task.workDone = aggregated.workDone
+            task.comments = task.comments || []
+            task.comments.push({
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              taskId: task._id.toString(),
+              userId: user._id.toString(),
+              userName: empName,
+              role: user.role,
+              content: actionTakenStr,
+              timestamp: new Date().toISOString(),
+              isVisibleToEmployee: true
+            })
             if (task.status !== 'Completed') {
               task.status = aggregated.status
             }

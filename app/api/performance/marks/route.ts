@@ -38,6 +38,7 @@ export async function GET(req: Request) {
       query.employeeId = user._id.toString()
     } else if (user.role === 'Project Head') {
       query.employeeId = { $in: user.assignedEmployees || [] }
+      query.projectId = { $in: ['all', ...(user.assignedProjects || [])] }
     }
 
     const requestedEmployeeId = searchParams.get('employeeId')
@@ -59,7 +60,14 @@ export async function GET(req: Request) {
       }
       query.periodStart = periodStart
     }
-    if (projectId) query.projectId = projectId
+    if (projectId) {
+      if (user.role === 'Project Head' &&
+          projectId !== 'all' &&
+          !(user.assignedProjects || []).includes(projectId)) {
+        return NextResponse.json({ error: 'Project is outside your assigned scope' }, { status: 403 })
+      }
+      query.projectId = projectId
+    }
 
     const marks = await PerformanceMark.find(query).sort({ periodStart: -1, updatedAt: -1 }).lean()
     return NextResponse.json(marks)
@@ -73,8 +81,8 @@ export async function POST(req: Request) {
   try {
     const user = await getAuthUser(req)
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (user.role !== 'Director') {
-      return NextResponse.json({ error: 'Only the Director can submit weekly performance marks' }, { status: 403 })
+    if (!['Director', 'Project Head', 'Employee'].includes(user.role)) {
+      return NextResponse.json({ error: 'You are not allowed to submit weekly performance marks' }, { status: 403 })
     }
 
     await connectToDatabase()
@@ -85,7 +93,10 @@ export async function POST(req: Request) {
     const rating = Number(body.rating)
     const comment = typeof body.comment === 'string' ? body.comment.trim() : ''
 
-    if (!mongoose.Types.ObjectId.isValid(employeeId) || !mongoose.Types.ObjectId.isValid(projectId) || !validDate(periodStart)) {
+    const isOverallRating = projectId === 'all'
+    if (!mongoose.Types.ObjectId.isValid(employeeId) ||
+        (!isOverallRating && !mongoose.Types.ObjectId.isValid(projectId)) ||
+        !validDate(periodStart)) {
       return NextResponse.json({ error: 'A valid employee, project, and week start date are required' }, { status: 400 })
     }
     const weekStart = new Date(`${periodStart}T00:00:00.000Z`)
@@ -96,33 +107,65 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Performance rating must be between 1 and 10' }, { status: 400 })
     }
 
+    if (user.role === 'Employee' && employeeId !== user._id.toString()) {
+      return NextResponse.json({ error: 'You can only submit your own performance mark' }, { status: 403 })
+    }
+    if (user.role === 'Project Head' && !(user.assignedEmployees || []).includes(employeeId)) {
+      return NextResponse.json({ error: 'Employee is outside your assigned scope' }, { status: 403 })
+    }
+
     const employee = await Employee.findOne({ _id: employeeId, role: 'Employee' }).select('_id')
     if (!employee) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
     }
-    if (!(await Project.exists({ _id: projectId }))) {
-      return NextResponse.json({ error: 'Selected project does not exist' }, { status: 400 })
-    }
-    const employeeIsAssigned = await Employee.exists({ _id: employeeId, assignedProjects: projectId })
-    const employeeHasProjectWork = Boolean(
-      await Task.exists({ projectId, assignedEmployeeIds: employeeId }) ||
-      await DailyEntry.exists({ projectId, employeeId })
-    )
-    if (!employeeIsAssigned && !employeeHasProjectWork) {
-      return NextResponse.json({ error: 'Employee has no assigned work in the selected project' }, { status: 400 })
+    if (!isOverallRating) {
+      if (!(await Project.exists({ _id: projectId }))) {
+        return NextResponse.json({ error: 'Selected project does not exist' }, { status: 400 })
+      }
+      if (user.role === 'Project Head' && !(user.assignedProjects || []).includes(projectId)) {
+        return NextResponse.json({ error: 'Project is outside your assigned scope' }, { status: 403 })
+      }
+      const employeeIsAssigned = await Employee.exists({ _id: employeeId, assignedProjects: projectId })
+      const employeeHasProjectWork = Boolean(
+        await Task.exists({ projectId, assignedEmployeeIds: employeeId }) ||
+        await DailyEntry.exists({ projectId, employeeId })
+      )
+      if (!employeeIsAssigned && !employeeHasProjectWork) {
+        return NextResponse.json({ error: 'Employee has no assigned work in the selected project' }, { status: 400 })
+      }
+    } else if (user.role === 'Employee') {
+      const employeeHasWork = Boolean(
+        await Task.exists({ assignedEmployeeIds: employeeId }) ||
+        await DailyEntry.exists({ employeeId })
+      )
+      if (!employeeHasWork) {
+        return NextResponse.json({ error: 'Log work before submitting a weekly self-rating' }, { status: 400 })
+      }
     }
 
     const periodEnd = getWeekEnd(periodStart)
-    const mark = await PerformanceMark.create({
-      employeeId,
-      projectId,
-      periodStart,
-      periodEnd,
-      rating,
-      ratingScale: 10,
-      comment,
-      directorId: user._id.toString()
-    })
+    const existingMark = await PerformanceMark.findOne({ employeeId, projectId, periodStart })
+    const ratingField = user.role === 'Employee'
+      ? 'selfRating'
+      : user.role === 'Project Head'
+        ? 'coordinatorRating'
+        : 'rating'
+    if (existingMark && existingMark.get(ratingField) !== undefined) {
+      return NextResponse.json({ error: 'A weekly rating has already been submitted for this role' }, { status: 409 })
+    }
+    const ratingFields = user.role === 'Employee'
+      ? { selfRating: rating, selfComment: comment, selfSubmittedAt: new Date() }
+      : user.role === 'Project Head'
+        ? { coordinatorRating: rating, coordinatorComment: comment, coordinatorId: user._id.toString() }
+        : { rating, ratingScale: 10, comment, directorId: user._id.toString() }
+    const mark = await PerformanceMark.findOneAndUpdate(
+      { employeeId, projectId, periodStart },
+      {
+        $set: ratingFields,
+        $setOnInsert: { employeeId, projectId, periodStart, periodEnd }
+      },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    )
     return NextResponse.json(mark)
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 11000) {

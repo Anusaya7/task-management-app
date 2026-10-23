@@ -40,6 +40,7 @@ export interface Project {
   projectCode?: string;
   location?: string;
   description: string;
+  startDate?: string;
   contactDetails?: string;
   projectRemarks?: ProjectRemark[];
   status: ProjectStatus;
@@ -136,6 +137,7 @@ export interface Task {
   flagStatus?: 'Open' | 'Resolved' | 'None';
   flagMessage?: string;
   flagDate?: string;
+  startDate?: string;
   dueDate?: string;
   parentTaskId?: string;
   parentTaskTitle?: string;
@@ -275,6 +277,8 @@ export interface EmployeePerformance {
     periodEnd: string;
     tasksDone: number;
     hoursLogged: number;
+    freeHours: number;
+    taskTitles: string[];
     rating: number | null;
   }>;
   weekly?: {
@@ -323,15 +327,23 @@ export interface EmployeePerformance {
     }>;
   };
   weeklyMark?: {
-    rating: number;
-    comment: string;
+    rating?: number;
+    comment?: string;
+    selfRating?: number;
+    selfComment?: string;
+    coordinatorRating?: number;
+    coordinatorComment?: string;
     periodStart: string;
     periodEnd: string;
     projectId: string;
   };
   weeklyMarks?: Array<{
-    rating: number;
-    comment: string;
+    rating?: number;
+    comment?: string;
+    selfRating?: number;
+    selfComment?: string;
+    coordinatorRating?: number;
+    coordinatorComment?: string;
     periodStart: string;
     periodEnd: string;
     projectId: string;

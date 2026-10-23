@@ -40,8 +40,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (user.role !== 'Director' && user.role !== 'Project Head') {
-      return NextResponse.json({ error: 'Forbidden: Only Director or Project Head can edit projects' }, { status: 403 })
+    if (user.role !== 'Director') {
+      return NextResponse.json({ error: 'Forbidden: Only the Director can edit projects' }, { status: 403 })
     }
 
     await connectToDatabase()
@@ -67,6 +67,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     }
     if (body.location !== undefined) project.location = body.location.trim()
     if (body.description) project.description = body.description.trim()
+    if (body.startDate !== undefined) project.startDate = String(body.startDate).trim()
     if (body.contactDetails !== undefined) project.contactDetails = body.contactDetails.trim()
     if (body.status) project.status = persistProjectStatus(body.status)
     if (Array.isArray(body.projectRemarks)) {

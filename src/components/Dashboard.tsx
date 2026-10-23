@@ -22,6 +22,8 @@ import EmployeeModal from './EmployeeModal';
 import EmployeeList from './EmployeeList';
 import NotificationCenter from './NotificationCenter';
 import DirectorProfile from './DirectorProfile';
+import DirectorPerformanceReview from './DirectorPerformanceReview';
+import DailyTaskBoardView from './DailyTaskBoardView';
 import {
   PriorityBadge,
   EmployeeStatusBadge,
@@ -141,7 +143,10 @@ interface ManagementCompletedHistoryProps {
   onEmployeeFilterChange: (value: string) => void;
   onTimeFilterChange: (value: CompletedTimeFilter) => void;
   onTimeDateChange: (value: string) => void;
-  onShiftBack: () => void;
+  onShiftTaskBack: (task: Task) => void;
+  canEditLog: boolean;
+  onUpdateDailyEntry: (entryId: string, updates: { actionTaken: string; hours: number }) => Promise<void>;
+  onDeleteDailyEntry: (entryId: string) => Promise<void>;
 }
 
 const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
@@ -157,8 +162,16 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
   onEmployeeFilterChange,
   onTimeFilterChange,
   onTimeDateChange,
-  onShiftBack
+  onShiftTaskBack,
+  canEditLog,
+  onUpdateDailyEntry,
+  onDeleteDailyEntry
 }) => {
+  const [selectedHistoryTask, setSelectedHistoryTask] = useState<Task | null>(null);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editingActionTaken, setEditingActionTaken] = useState('');
+  const [editingHours, setEditingHours] = useState('');
+
   const formatCompletedDate = (value?: string) => {
     if (!value) return '-';
     const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value;
@@ -176,15 +189,6 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
     return projects.find(project => String(project.id || project._id) === String(task.projectId))?.projectName || '-';
   };
 
-  const employeeNamesFor = (task: Task) => {
-    if (task.assignedEmployeeNames?.length) return task.assignedEmployeeNames.join(', ');
-    const assignedIds = task.assignedEmployeeIds || [];
-    const names = employees
-      .filter(employee => assignedIds.includes(String(employee.id || employee._id)))
-      .map(employee => `${employee.firstName} ${employee.lastName}`.trim());
-    return names.join(', ') || '-';
-  };
-
   const hoursFor = (task: Task) => {
     const id = String(task.id || task._id || '');
     const hours = dailyEntries
@@ -192,6 +196,28 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
       .reduce((total, entry) => total + (Number(entry.hours) || 0), 0);
     return Number(hours.toFixed(2));
   };
+  const completedChildrenOf = (task: Task) => completedTasks.filter(candidate =>
+    String(candidate.parentTaskId || '') === String(task.id || task._id || '')
+  );
+  const hoursForCompletedGroup = (task: Task) => {
+    const ids = new Set([task, ...completedChildrenOf(task)].map(item => String(item.id || item._id || '')));
+    const hours = dailyEntries
+      .filter(entry => ids.has(String(entry.taskId)))
+      .reduce((total, entry) => total + (Number(entry.hours) || 0), 0);
+    return Number(hours.toFixed(2));
+  };
+  const completedRootTasks = completedTasks.filter(task =>
+    !task.parentTaskId || !completedTasks.some(candidate => String(candidate.id || candidate._id || '') === String(task.parentTaskId))
+  );
+  const selectedHistoryTaskIds = selectedHistoryTask
+    ? new Set([selectedHistoryTask, ...completedChildrenOf(selectedHistoryTask)].map(task => String(task.id || task._id || '')))
+    : new Set<string>();
+  const taskEntries = selectedHistoryTask
+    ? dailyEntries
+        .filter(entry => selectedHistoryTaskIds.has(String(entry.taskId)))
+        .sort((first, second) => first.date.localeCompare(second.date))
+    : [];
+  const taskComments = selectedHistoryTask?.comments || [];
 
   return (
     <section className="space-y-5" aria-labelledby="completed-history-title">
@@ -251,19 +277,19 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
       <div className="overflow-x-auto border border-[#E2E8F0] bg-white">
         <table className="w-full min-w-[740px] table-fixed border-collapse text-left text-sm">
           <colgroup>
-            <col className="w-[39%]" />
-            <col className="w-[24%]" />
-            <col className="w-[16%]" />
+            <col className="w-[48%]" />
+            <col className="w-[13%]" />
+            <col className="w-[13%]" />
+            <col className="w-[12%]" />
             <col className="w-[14%]" />
-            <col className="w-[7%]" />
           </colgroup>
           <thead className="bg-[#334155] text-white">
             <tr>
-              <th scope="col" className="border-r border-slate-500 px-2.5 py-2 text-sm font-bold">Task</th>
-              <th scope="col" className="border-r border-slate-500 px-2.5 py-2 text-sm font-bold">Project</th>
-              <th scope="col" className="border-r border-slate-500 px-2 py-2 text-xs font-bold">Employee</th>
-              <th scope="col" className="border-r border-slate-500 px-2 py-2 text-xs font-bold">Completed on</th>
-              <th scope="col" className="px-2 py-2 text-xs font-bold">Hours</th>
+              <th scope="col" className="border-r border-slate-500 px-2.5 py-2 text-sm font-bold">Project / Task / Subtasks and description</th>
+              <th scope="col" className="border-r border-slate-500 px-2 py-2 text-xs font-bold">Allocated</th>
+              <th scope="col" className="border-r border-slate-500 px-2 py-2 text-xs font-bold">Completed</th>
+              <th scope="col" className="border-r border-slate-500 px-2 py-2 text-xs font-bold">Total hours</th>
+              <th scope="col" className="px-2 py-2 text-xs font-bold">Log</th>
             </tr>
           </thead>
           <tbody>
@@ -273,31 +299,204 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
                   No completed tasks recorded in archive.
                 </td>
               </tr>
-            ) : completedTasks.map((task, index) => (
+            ) : completedRootTasks.map((task, index) => (
               <tr
                 key={task.id || task._id}
                 className={`border-t border-[#E2E8F0] ${index % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}`}
               >
-                <td className="border-r border-[#E2E8F0] px-2.5 py-2.5 text-sm text-[#1E293B]">{task.title}</td>
-                <td className="border-r border-[#E2E8F0] px-2.5 py-2.5 text-sm text-[#1E293B]">{projectNameFor(task)}</td>
-                <td className="border-r border-[#E2E8F0] px-2 py-2.5 text-xs text-[#1E293B]">{employeeNamesFor(task)}</td>
+                <td className="border-r border-[#E2E8F0] px-2.5 py-2.5 text-sm text-[#1E293B]">
+                  <p className="font-semibold">{projectNameFor(task)} / {task.title}</p>
+                  {completedChildrenOf(task).map(subtask => (
+                    <p key={String(subtask.id || subtask._id)} className="pl-3 text-xs text-slate-600">
+                      {projectNameFor(task)}/{task.title}/{subtask.title}
+                    </p>
+                  ))}
+                  {task.parentTaskTitle && <p className="mt-0.5 text-xs text-slate-600">Subtask of {task.parentTaskTitle}</p>}
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600">{task.description || '-'}</p>
+                </td>
+                <td className="border-r border-[#E2E8F0] px-2 py-2.5 text-xs text-[#1E293B]">
+                  {formatCompletedDate(task.startDate || task.createdAt)}
+                </td>
                 <td className="border-r border-[#E2E8F0] px-2 py-2.5 text-xs text-[#1E293B]">
                   {formatCompletedDate(task.approvalDate || task.updatedAt || task.dueDate)}
                 </td>
-                <td className="px-2 py-2.5 text-xs text-[#1E293B]">{hoursFor(task)}</td>
+                <td className="border-r border-[#E2E8F0] px-2 py-2.5 text-xs text-[#1E293B]">{hoursForCompletedGroup(task)}</td>
+                <td className="px-2 py-2.5 text-xs text-[#1E293B]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHistoryTask(task)}
+                    className="inline-flex items-center gap-1 px-1 py-1.5 font-semibold text-[#2563EB] hover:underline"
+                  >
+                    View <span aria-hidden="true">›</span>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <button
-        type="button"
-        onClick={onShiftBack}
-        className="inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-[#475569] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#38465B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600 focus-visible:ring-offset-2 sm:w-[276px]"
-      >
-        Shift back to Dash Board
-      </button>
+      {selectedHistoryTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="completed-log-title">
+          <div className={`max-h-[90vh] w-full ${canEditLog ? 'max-w-3xl' : 'max-w-5xl'} overflow-y-auto rounded-md border border-slate-300 bg-white shadow-2xl`}>
+            <div className={`flex items-start justify-between gap-4 px-5 py-3 ${canEditLog ? 'border-b border-slate-200' : 'bg-[#25527A] text-white'}`}>
+              <div>
+                <h3 id="completed-log-title" className={`text-lg font-bold ${canEditLog ? 'text-slate-900' : 'text-white'}`}>{canEditLog ? selectedHistoryTask.title : 'Log history (pop-up window)'}</h3>
+                <p className={`mt-1 text-sm ${canEditLog ? 'text-slate-600' : 'text-blue-100'}`}>{projectNameFor(selectedHistoryTask)} · Allocated {formatCompletedDate(selectedHistoryTask.startDate || selectedHistoryTask.createdAt)} · Completed {formatCompletedDate(selectedHistoryTask.approvalDate || selectedHistoryTask.updatedAt || selectedHistoryTask.dueDate)}</p>
+                {canEditLog && <p className="mt-1 text-xs text-slate-600">Total hours: {hoursFor(selectedHistoryTask)}</p>}
+              </div>
+              <button type="button" onClick={() => setSelectedHistoryTask(null)} aria-label="Close task log" className={`rounded-md p-1 ${canEditLog ? 'text-slate-500 hover:bg-slate-100' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}><X size={20} /></button>
+            </div>
+            <div className="space-y-4 p-5">
+              {!canEditLog && (
+                <p className="font-semibold text-[#25527A]">
+                  {projectNameFor(selectedHistoryTask)}/{selectedHistoryTask.title}
+                  {completedChildrenOf(selectedHistoryTask).length > 0 && ` | ${completedChildrenOf(selectedHistoryTask).map(child => child.title).join(', ')}`}
+                </p>
+              )}
+              <div>
+                <h4 className={`mb-2 text-sm font-semibold text-slate-800 ${canEditLog ? '' : 'sr-only'}`}>Date-wise comments and hours</h4>
+                {!canEditLog && taskEntries.length > 0 ? (
+                  <div className="overflow-x-auto border border-[#E2E8F0]">
+                    <table className="w-full min-w-[620px] border-collapse text-left text-sm">
+                      <thead className="bg-[#334155] text-white"><tr>
+                        <th className="border border-[#94A3B8] px-2.5 py-2">Date &amp; time</th>
+                        <th className="border border-[#94A3B8] px-2.5 py-2">Comment</th>
+                        <th className="border border-[#94A3B8] px-2.5 py-2">By</th>
+                        <th className="border border-[#94A3B8] px-2.5 py-2">Hours</th>
+                      </tr></thead>
+                      <tbody>{taskEntries.map((entry, index) => (
+                        <tr key={entry.id || entry._id} className={index % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5">
+                            {formatCompletedDate(entry.date)}{entry.createdAt ? `, ${new Date(entry.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
+                          </td>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5 whitespace-pre-wrap">{entry.actionTaken}</td>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5">{entry.employeeName || 'Employee'}</td>
+                          <td className="border border-[#E2E8F0] px-2.5 py-2.5">{formatHoursMinutes(Number(entry.hours) || 0)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : taskEntries.length > 0 ? (
+                  <ol className="space-y-2">
+                    {taskEntries.map(entry => (
+                      <li key={entry.id || entry._id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                          <span>{formatCompletedDate(entry.date)} · {entry.employeeName || 'Employee'}</span>
+                          <span>{formatHoursMinutes(Number(entry.hours) || 0)}</span>
+                        </div>
+                        {editingEntryId === String(entry.id || entry._id) ? (
+                          <div className="mt-2 space-y-2">
+                            <textarea
+                              value={editingActionTaken}
+                              onChange={event => setEditingActionTaken(event.target.value)}
+                              rows={3}
+                              aria-label="Edit daily log comment"
+                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                            />
+                            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                              Hours
+                              <input
+                                type="number"
+                                min="0"
+                                max="8"
+                                step="0.01"
+                                value={editingHours}
+                                onChange={event => setEditingHours(event.target.value)}
+                                className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                              />
+                            </label>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const entryId = String(entry.id || entry._id || '');
+                                  const hours = Number(editingHours);
+                                  if (!entryId || !editingActionTaken.trim() || !Number.isFinite(hours) || hours < 0 || hours > 8) return;
+                                  void onUpdateDailyEntry(entryId, { actionTaken: editingActionTaken.trim(), hours })
+                                    .then(() => setEditingEntryId(null))
+                                    .catch(() => {});
+                                }}
+                                className="rounded-md bg-[#2563EB] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1D4ED8]"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingEntryId(null)}
+                                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{entry.actionTaken}</p>
+                        )}
+                        {canEditLog && editingEntryId !== String(entry.id || entry._id) && (
+                          <div className="mt-2 flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingEntryId(String(entry.id || entry._id || ''));
+                                setEditingActionTaken(entry.actionTaken || '');
+                                setEditingHours(String(entry.hours ?? ''));
+                              }}
+                              className="text-xs font-semibold text-blue-700 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const entryId = String(entry.id || entry._id || '');
+                                if (entryId && window.confirm('Delete this date-wise log entry?')) {
+                                  void onDeleteDailyEntry(entryId);
+                                }
+                              }}
+                              className="text-xs font-semibold text-red-700 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                ) : taskComments.length > 0 ? (
+                  <ol className="space-y-2">
+                    {taskComments.map(comment => (
+                      <li key={comment.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold text-slate-600">{formatCompletedDate(comment.timestamp)} · {comment.userName}</p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{comment.content}</p>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No comments or hours were recorded for this task.</p>
+                )}
+              </div>
+              {!canEditLog && (
+                <p className="text-base font-bold text-slate-800">Total hours: {hoursFor(selectedHistoryTask)}</p>
+              )}
+              <div className={`flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row ${canEditLog ? 'sm:justify-end' : 'sm:justify-start'}`}>
+                <button type="button" onClick={() => setSelectedHistoryTask(null)} className={`rounded-md px-5 py-2.5 text-sm font-bold text-white ${canEditLog ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50' : 'bg-[#64748B] hover:bg-[#475569]'} min-w-36`}>Close</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const task = selectedHistoryTask;
+                    setSelectedHistoryTask(null);
+                    onShiftTaskBack(task);
+                  }}
+                  className={`rounded-md px-5 py-2.5 text-sm font-bold text-white ${canEditLog ? 'bg-[#2563EB] hover:bg-[#1D4ED8]' : 'bg-[#475569] hover:bg-[#334155]'}`}
+                >
+                  Shift back to Dash Board
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
@@ -305,7 +504,9 @@ const ManagementCompletedHistory: React.FC<ManagementCompletedHistoryProps> = ({
 const Dashboard: React.FC = () => {
   const { user, isDirector, isProjectHead } = useAuth();
   const isManagementDashboard = isDirector || isProjectHead;
-  const [activeTab, setActiveTab] = useState<TabType>(isManagementDashboard ? 'completed' : 'overview');
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const isManagementPersonalView = isManagementDashboard && activeTab === 'overview';
+  const isDirectorTaskAllotmentView = isDirector && activeTab === 'tasks';
 
   const [projects, setProjects] = useState<Project[]>([]);
   const projectsRequestIdRef = useRef(0);
@@ -320,9 +521,13 @@ const Dashboard: React.FC = () => {
     projectId: string;
     periodStart: string;
     periodEnd: string;
-    rating: number;
+    rating?: number;
     ratingScale?: number;
-    comment: string;
+    comment?: string;
+    selfRating?: number;
+    selfComment?: string;
+    coordinatorRating?: number;
+    coordinatorComment?: string;
   }>>([]);
   const [loadedPerformanceMarksKey, setLoadedPerformanceMarksKey] = useState('');
   const [dailyEntries, setDailyEntries] = useState<DailyEntry[]>([]);
@@ -336,6 +541,7 @@ const Dashboard: React.FC = () => {
 
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [personalTaskMode, setPersonalTaskMode] = useState(false);
 
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -385,6 +591,7 @@ const Dashboard: React.FC = () => {
   }).format(new Date()));
   const [perfView, setPerfView] = useState<'week' | 'month' | 'year'>('week');
   const [perfProjectFilter, setPerfProjectFilter] = useState<string>('all');
+  const [perfEmployeeFilter, setPerfEmployeeFilter] = useState<string>('all');
   const [performanceWeekStart, setPerformanceWeekStart] = useState(() => {
     const today = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Kolkata',
@@ -396,7 +603,6 @@ const Dashboard: React.FC = () => {
   });
   const [performanceMonthSelection, setPerformanceMonthSelection] = useState(() => getCurrentKolkataDate().slice(0, 7));
   const [performanceYearSelection, setPerformanceYearSelection] = useState(() => getCurrentKolkataDate().slice(0, 4));
-  const [hasSelectedPerformanceWeek, setHasSelectedPerformanceWeek] = useState(false);
   const [expandedPerformanceEmployeeId, setExpandedPerformanceEmployeeId] = useState<string | null>(null);
   const { start: performancePeriodStart, end: performancePeriodEnd } = getPerformancePeriodRange(
     perfView,
@@ -418,10 +624,9 @@ const Dashboard: React.FC = () => {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [dailyCartIds, setDailyCartIds] = useState<string[]>([]);
   const [boardEdits, setBoardEdits] = useState<Record<string, {
-    priority: TaskPriority;
-    assignedEmployeeIds: string[];
-    reminderDate: string;
     comment: string;
+    hours: string;
+    flagged: boolean;
   }>>({});
   const [cartSubmittingId, setCartSubmittingId] = useState<string | null>(null);
 
@@ -462,8 +667,9 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const openCreateTask = () => {
+  const openCreateTask = (personalTask = false) => {
     setSelectedTask(null);
+    setPersonalTaskMode(personalTask);
     setIsTaskModalOpen(true);
     void reloadProjects();
   };
@@ -826,10 +1032,9 @@ const Dashboard: React.FC = () => {
         const t = tasks.find(item => taskKey(item) === id);
         if (!t || next[id]) return;
         next[id] = {
-          priority: t.priority,
-          assignedEmployeeIds: [...(t.assignedEmployeeIds || [])],
-          reminderDate: (t.reminderDate || t.dueDate || '').substring(0, 10),
-          comment: ''
+          comment: '',
+          hours: '',
+          flagged: false
         };
       });
       return next;
@@ -947,44 +1152,182 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleSubmitDailyBoardUpdate = async (task: Task) => {
-    const id = taskKey(task);
-    const edit = boardEdits[id] || {
-      priority: task.priority,
-      assignedEmployeeIds: [...(task.assignedEmployeeIds || [])],
-      reminderDate: (task.reminderDate || task.dueDate || '').substring(0, 10),
-      comment: ''
-    };
-    if (!edit.comment.trim()) {
-      showToast('error', 'Add a comment before submitting.');
-      return;
-    }
-    setCartSubmittingId(id);
+  const handleUpdateCompletedLog = async (
+    entryId: string,
+    updates: { actionTaken: string; hours: number }
+  ) => {
     try {
-      const remarkField = isDirector ? 'directorRemark' : 'projectHeadRemark';
-      const res = await fetch(`/api/tasks/${id}`, {
+      const response = await fetch(`/api/daily-entries/${entryId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...task,
-          priority: edit.priority,
-          assignedEmployeeIds: edit.assignedEmployeeIds,
-          reminderDate: edit.reminderDate || undefined,
-          dueDate: edit.reminderDate || task.dueDate,
-          nextComment: edit.comment.trim(),
-          [remarkField]: edit.comment.trim()
-        })
+        body: JSON.stringify(updates)
       });
-      if (!res.ok) {
-        const data = await res.json();
-        showToast('error', data.error || 'Failed to update task');
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to update the daily log.');
+      }
+      showToast('success', 'Daily log updated.');
+      await fetchData(false);
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'Failed to update the daily log.');
+      throw error;
+    }
+  };
+
+  const handleDeleteCompletedLog = async (entryId: string) => {
+    try {
+      const response = await fetch(`/api/daily-entries/${entryId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete the daily log.');
+      }
+      showToast('success', 'Daily log deleted.');
+      await fetchData(false);
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'Failed to delete the daily log.');
+    }
+  };
+
+  const handleCompleteTask = async (task: Task) => {
+    const id = taskKey(task);
+    if (!id || !(isDirector || isProjectHead)) return;
+    try {
+      const response = await fetch(`/api/tasks/${id}/approve-completion`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: true, remarks: 'Marked completed from Task Allotment' })
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        showToast('error', data.error || 'Failed to complete task.');
         return;
       }
-      setBoardEdits(prev => ({ ...prev, [id]: { ...edit, comment: '' } }));
-      showToast('success', 'Task details and comment saved.');
+      setIsTaskModalOpen(false);
+      setSelectedTask(null);
+      showToast('success', 'Task moved to Completed Task History.');
       await fetchData();
     } catch {
       showToast('error', 'Network error.');
+    }
+  };
+
+  const handleLogDailyBoardEntry = async (task: Task) => {
+    const id = taskKey(task);
+    const edit = boardEdits[id] || {
+      comment: '',
+      hours: '',
+      flagged: false
+    };
+
+    const hours = Number(edit.hours);
+    if (!edit.comment.trim()) {
+      showToast('error', 'Add today’s comment before submitting the daily entry.');
+      return;
+    }
+    if (!Number.isFinite(hours) || hours <= 0) {
+      showToast('error', 'Enter valid working hours greater than zero.');
+      return;
+    }
+    if (todayLoggedHours + hours > 8) {
+      showToast('error', `Daily work cannot exceed 8 hours. You have ${(8 - todayLoggedHours).toFixed(2)} hour(s) remaining.`);
+      return;
+    }
+
+    setCartSubmittingId(id);
+    try {
+      const response = await fetch('/api/daily-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: id,
+          projectId: task.projectId,
+          projectName: task.projectName || '',
+          taskTitle: task.title,
+          details: task.description || task.title,
+          actionTaken: edit.comment.trim(),
+          hours,
+          flagged: edit.flagged,
+          status: 'In Progress'
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showToast('error', data.error || 'Failed to submit daily entry.');
+        return;
+      }
+      setBoardEdits(previous => ({
+        ...previous,
+        [id]: { ...edit, comment: '', hours: '', flagged: false }
+      }));
+      showToast('success', 'Daily entry submitted successfully.');
+      await fetchData();
+    } catch {
+      showToast('error', 'Network error while submitting daily entry.');
+    } finally {
+      setCartSubmittingId(null);
+    }
+  };
+
+  const handleSubmitDirectorDailyBoard = async () => {
+    if (cartTasks.length === 0) {
+      showToast('error', 'Add tasks to the Daily Task Board before submitting.');
+      return;
+    }
+
+    const entries = cartTasks.map(task => {
+      const id = taskKey(task);
+      const edit = boardEdits[id] || { comment: '', hours: '', flagged: false };
+      return { task, id, edit, hours: Number(edit.hours) };
+    });
+    const missingEntry = entries.find(entry =>
+      !entry.edit.comment.trim() || !Number.isFinite(entry.hours) || entry.hours <= 0
+    );
+    if (missingEntry) {
+      showToast('error', `Add today's comment and valid hours for ${missingEntry.task.title}.`);
+      return;
+    }
+
+    const totalHours = entries.reduce((total, entry) => total + entry.hours, 0);
+    if (todayLoggedHours + totalHours > 8) {
+      showToast('error', `Daily work cannot exceed 8 hours. You have ${todayFreeHours.toFixed(2)} hour(s) remaining.`);
+      return;
+    }
+
+    setCartSubmittingId('all');
+    try {
+      const response = await fetch('/api/daily-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entries.map(({ task, edit, hours }) => ({
+          taskId: taskKey(task),
+          projectId: task.projectId,
+          projectName: task.projectName || '',
+          taskTitle: task.title,
+          details: task.description || task.title,
+          actionTaken: edit.comment.trim(),
+          hours,
+          flagged: edit.flagged,
+          status: 'In Progress'
+        })))
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showToast('error', data.error || 'Failed to submit daily entries.');
+        return;
+      }
+
+      setBoardEdits(previous => {
+        const updated = { ...previous };
+        entries.forEach(({ id }) => {
+          updated[id] = { comment: '', hours: '', flagged: false };
+        });
+        return updated;
+      });
+      setDailyCartIds(previous => previous.filter(id => !entries.some(entry => entry.id === id)));
+      showToast('success', 'Daily entries submitted successfully.');
+      await fetchData();
+    } catch {
+      showToast('error', 'Network error while submitting daily entries.');
     } finally {
       setCartSubmittingId(null);
     }
@@ -1125,11 +1468,9 @@ const Dashboard: React.FC = () => {
   const handleSubmitWeeklyMarks = async () => {
     if (
       perfView !== 'week' ||
-      perfProjectFilter === 'all' ||
-      !hasSelectedPerformanceWeek ||
       loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}`
     ) {
-      showToast('error', 'Select a project and week before submitting weekly ratings.');
+      showToast('error', 'Wait for the selected week’s performance data to finish loading.');
       return;
     }
 
@@ -1137,7 +1478,11 @@ const Dashboard: React.FC = () => {
       .map(employee => {
         const employeeId = String(employee.employeeId);
         const draft = weeklyRatingDrafts[employeeId];
-        return draft && draft.rating && !getWeeklyMark(employeeId)
+        const mark = getWeeklyMark(employeeId);
+        const alreadySubmitted = isDirector
+          ? typeof mark?.rating === 'number'
+          : typeof mark?.coordinatorRating === 'number';
+        return draft && draft.rating && !alreadySubmitted
           ? { employeeId, rating: Number(draft.rating), comment: draft.comment.trim() }
           : null;
       })
@@ -1157,7 +1502,7 @@ const Dashboard: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               employeeId: rating.employeeId,
-              projectId: perfProjectFilter,
+              projectId: 'all',
               periodStart: performanceWeekStart,
               rating: rating.rating,
               comment: rating.comment
@@ -1175,7 +1520,14 @@ const Dashboard: React.FC = () => {
       const failedRatings = results.filter(result => 'error' in result);
 
       if (savedRatings.length > 0) {
-        setPerformanceMarks(previous => [...previous, ...savedRatings.map(result => result.mark)]);
+        setPerformanceMarks(previous => [
+          ...previous.filter(mark => !savedRatings.some(result =>
+            mark.employeeId === result.mark.employeeId &&
+            mark.projectId === result.mark.projectId &&
+            mark.periodStart === result.mark.periodStart
+          )),
+          ...savedRatings.map(result => result.mark)
+        ]);
         setWeeklyRatingDrafts(previous => {
           const next = { ...previous };
           savedRatings.forEach(result => { delete next[result.employeeId]; });
@@ -1267,6 +1619,7 @@ const Dashboard: React.FC = () => {
               priority: item.priority || taskData.priority,
               assignedEmployeeIds: item.assignedEmployeeIds || taskData.assignedEmployeeIds,
               reminderDate: taskData.reminderDate,
+              startDate: taskData.startDate,
               dueDate: taskData.dueDate || taskData.reminderDate
             })
           });
@@ -1288,6 +1641,7 @@ const Dashboard: React.FC = () => {
                 priority: item.priority || taskData.priority,
                 assignedEmployeeIds: item.assignedEmployeeIds || taskData.assignedEmployeeIds,
                 reminderDate: taskData.reminderDate,
+                startDate: taskData.startDate,
                 dueDate: taskData.dueDate || taskData.reminderDate,
                 parentTaskId: savedTaskId
               })
@@ -1317,7 +1671,11 @@ const Dashboard: React.FC = () => {
         throw new Error(data.error || 'Failed to save task');
       }
 
-      showToast('success', isEdit ? 'Task updated.' : 'Task assigned successfully.');
+      showToast('success', isEdit
+        ? 'Task updated.'
+        : taskData.personalTask
+          ? 'Task added to your Dashboard.'
+          : 'Task assigned successfully.');
       fetchData();
     } catch (err: any) {
       throw err;
@@ -1380,6 +1738,7 @@ const Dashboard: React.FC = () => {
     return true;
   });
   const performanceRows = performanceData.filter(employee => {
+    if (perfEmployeeFilter !== 'all' && String(employee.employeeId) !== perfEmployeeFilter) return false;
     if (perfProjectFilter === 'all') return true;
     return tasks.some(task =>
       (task.assignedEmployeeIds || []).includes(String(employee.employeeId)) &&
@@ -1404,9 +1763,7 @@ const Dashboard: React.FC = () => {
     .sort((first, second) => second.date.localeCompare(first.date));
   const getWeeklyMark = (employeeId: string) => {
     if (
-      perfProjectFilter === 'all' ||
       perfView !== 'week' ||
-      (isDirector && !hasSelectedPerformanceWeek) ||
       loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}`
     ) return undefined;
     return performanceMarks.find(mark =>
@@ -1415,12 +1772,10 @@ const Dashboard: React.FC = () => {
       mark.periodStart === performanceWeekStart
     );
   };
-  const getWeeklyMarkScore = (mark: typeof performanceMarks[number]) =>
-    mark.ratingScale === 10 ? mark.rating : mark.rating * 2;
   const activeTasks = tasks.filter(t => ['Pending', 'In Progress'].includes(t.status));
 
-  // My Tasks: active/incomplete work assigned to the logged-in Director
-  const myDirectorTasks = tasks.filter(t => {
+  // Personal dashboard tasks are active/incomplete work assigned to the logged-in management user.
+  const myPersonalTasks = tasks.filter(t => {
     const uId = user?.id || (user as any)?._id || '';
     if (!uId) return false;
     const assignedToMe = Array.isArray(t.assignedEmployeeIds) && t.assignedEmployeeIds.includes(uId);
@@ -1442,6 +1797,10 @@ const Dashboard: React.FC = () => {
   });
 
   const filteredTasks = tasks.filter(t => {
+    if (isProjectHead && activeTab === 'tasks' && t.status === 'Completed') return false;
+    if (isManagementDashboard && activeTab === 'overview' && !myPersonalTasks.some(myTask => taskKey(myTask) === taskKey(t))) {
+      return false;
+    }
     if (taskPriorityFilter !== 'all' && t.priority !== taskPriorityFilter) return false;
     if (taskStatusFilter === 'current') {
       if (!['Pending', 'In Progress'].includes(t.status)) return false;
@@ -1480,6 +1839,12 @@ const Dashboard: React.FC = () => {
   });
 
   const boardTotalHours = filteredDailyBoard.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+  const signedInUserId = String(user?.id || (user as any)?._id || '');
+  const todayLoggedHours = Number(dailyEntries
+    .filter(entry => entry.employeeId === signedInUserId && entry.date === getCurrentKolkataDate())
+    .reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0)
+    .toFixed(2));
+  const todayFreeHours = Math.max(0, Number((8 - todayLoggedHours).toFixed(2)));
   const boardFiltersActive = Boolean(
     boardSearch || boardDateFilter || boardEmployeeFilter !== 'all' || boardProjectFilter !== 'all' || boardStatusFilter !== 'all'
   );
@@ -1517,12 +1882,45 @@ const Dashboard: React.FC = () => {
     }))
   );
   const groupedDirectorTasks = groupItemsByProject(
-    sortByHierarchyCode(myDirectorTasks, t => t.taskCode).map(t => ({
+    sortByHierarchyCode(myPersonalTasks, t => t.taskCode).map(t => ({
       ...t,
       projectId: t.projectId,
       projectName: t.projectName || 'Project'
     }))
   );
+  const directorDashboardTasks = myPersonalTasks.filter(task =>
+    taskPriorityFilter === 'all' || task.priority === taskPriorityFilter
+  );
+  const groupedDirectorDashboardTasks = groupItemsByProject(
+    sortByHierarchyCode(directorDashboardTasks, task => task.taskCode).map(task => ({
+      ...task,
+      projectId: task.projectId,
+      projectName: task.projectName || 'Project'
+    }))
+  );
+  const getDirectorDashboardSubtasks = (parentId: string, candidates: Task[]) => {
+    const descendants: Task[] = [];
+    const visited = new Set([parentId]);
+    const collectChildren = (currentParentId: string) => {
+      candidates.forEach(candidate => {
+        const candidateId = taskKey(candidate);
+        if (String(candidate.parentTaskId || '') !== currentParentId || visited.has(candidateId)) return;
+        visited.add(candidateId);
+        descendants.push(candidate);
+        collectChildren(candidateId);
+      });
+    };
+    collectChildren(parentId);
+    return descendants;
+  };
+  const directorDashboardTaskIds = directorDashboardTasks
+    .filter(task => task.status !== 'Completed' && !dailyCartIds.includes(taskKey(task)))
+    .map(taskKey);
+  const selectedDirectorDashboardTaskIds = selectedTaskIds.filter(id =>
+    directorDashboardTasks.some(task => taskKey(task) === id)
+  );
+  const allDirectorDashboardTasksSelected = directorDashboardTaskIds.length > 0 &&
+    directorDashboardTaskIds.every(id => selectedTaskIds.includes(id));
   const groupedFilteredTasks = groupItemsByProject(
     sortByHierarchyCode(filteredTasks, t => t.taskCode).map(t => ({
       ...t,
@@ -1562,7 +1960,8 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className={`flex min-h-screen font-sans text-slate-800 antialiased ${isManagementDashboard ? 'bg-[#F1F5F9]' : 'bg-[#F8FAFC]'}`}>
+    <div className={isDirector ? 'min-h-screen bg-[#E7E5E9] py-[10px]' : ''}>
+    <div className={`relative mx-auto flex min-h-[calc(100vh-20px)] font-sans text-slate-800 antialiased ${isDirector ? 'max-w-[1308px] border border-[#C7CAD0] bg-[#F1F5F9]' : `min-h-screen ${isManagementDashboard ? 'bg-[#F1F5F9]' : 'bg-[#F8FAFC]'}`}`}>
       {/* Grouped Left Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -1570,10 +1969,11 @@ const Dashboard: React.FC = () => {
         flagCount={openFlagsList.length}
         reminderCount={unrepliedRemindersList.length}
         cartCount={dailyCartIds.length}
+        taskCount={isDirector ? myPersonalTasks.length : isProjectHead ? activeTasks.length : 0}
       />
 
       {/* Main Workspace */}
-      <div className={`flex min-w-0 w-full flex-1 flex-col pt-20 px-4 pb-12 md:pt-6 md:ml-64 transition-all ${isManagementDashboard ? 'md:px-6' : 'md:px-8'}`}>
+      <div className={`flex min-w-0 w-full flex-1 flex-col pt-20 px-4 pb-12 ${isDirector ? 'md:pt-5' : 'md:pt-6'} ${isProjectHead ? 'md:ml-[266px]' : 'md:ml-64'} transition-all ${isManagementDashboard ? 'md:px-6' : 'md:px-8'}`}>
 
         {/* Sticky Corporate Top Header */}
         <div className={`flex flex-col justify-between gap-4 rounded-[14px] border border-[#E2E8F0] bg-white p-4 shadow-xs md:flex-row md:items-center md:px-6 ${isManagementDashboard ? 'mb-5 md:min-h-[84px]' : 'mb-6 md:py-4'}`}>
@@ -1590,7 +1990,7 @@ const Dashboard: React.FC = () => {
                       Online
                     </span>
                   </div>
-                  <p className="mt-1 text-xs font-semibold text-indigo-600">
+                  <p className="mt-1 text-xs font-semibold text-[#2563EB]">
                     Welcome, {user?.name || (isDirector ? 'Director' : 'Project Head')}
                   </p>
                 </div>
@@ -1608,12 +2008,12 @@ const Dashboard: React.FC = () => {
                     <h1 className="text-xl font-bold tracking-tight text-[#0F172A]">
                       Project Head Dashboard
                     </h1>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#D1FAE5] px-4 py-1.5 text-[10px] font-bold text-[#047857]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#10B981]" />
                       Online
                     </span>
                   </div>
-                  <p className="mt-1 text-xs font-semibold text-indigo-600">
+                  <p className="mt-1 text-xs font-semibold text-[#2563EB]">
                     Welcome, {user?.name || 'Project Head'}
                   </p>
                 </div>
@@ -1624,29 +2024,13 @@ const Dashboard: React.FC = () => {
           <div className={`flex flex-wrap items-center gap-3 ${isManagementDashboard ? 'md:justify-end' : ''}`}>
             <NotificationCenter onSelectTask={() => setActiveTab('overview')} />
 
-            {isManagementDashboard && (
-              <button
-                type="button"
-                onClick={() => setActiveTab('today-work')}
-                className="relative flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs font-semibold text-[#475569] transition hover:border-[#2563EB] hover:text-[#2563EB]"
-              >
-                <ShoppingCart size={14} className="text-[#2563EB]" />
-                <span>Daily Board</span>
-                {dailyCartIds.length > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#2563EB] px-1 text-[10px] font-extrabold text-white">
-                    {dailyCartIds.length}
-                  </span>
-                )}
-              </button>
-            )}
-
-            <div className="flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs font-semibold text-[#475569]">
+            <div className="flex items-center gap-2 rounded-lg border border-[#CBD5E1] bg-white px-3.5 py-1.5 text-xs font-medium text-[#334155]">
               {!isManagementDashboard && <Calendar size={14} className="text-[#2563EB]" />}
               <span>{todayFormatted}</span>
             </div>
 
             {isManagementDashboard ? (
-              <div className="rounded-lg border border-[#D7DDF7] bg-[#F1F3FF] px-4 py-2 text-center text-xs font-semibold text-[#334155]">
+              <div className="rounded-lg border border-[#BFDBFE] bg-[#EEF2FF] px-4 py-1.5 text-center text-xs font-semibold text-[#1E293B]">
                 {getShortName(user?.name)}
               </div>
             ) : (
@@ -1659,15 +2043,6 @@ const Dashboard: React.FC = () => {
               </button>
             )}
 
-            {!isDirector && (
-              <button
-                onClick={openCreateTask}
-                className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#1D4ED8]"
-              >
-                <Plus size={14} />
-                <span>Create Task</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -1683,8 +2058,161 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
+        {activeTab === 'overview' && isManagementDashboard && (
+          <section className="space-y-4" aria-labelledby="personal-dashboard-tasks-title">
+            <h2 id="personal-dashboard-tasks-title" className="text-xl font-bold text-[#0F172A]">
+              Tasks and flags
+            </h2>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {[
+                { value: 'Urgent', label: 'Urgent', color: 'bg-[#DC2626] hover:bg-[#B91C1C]' },
+                { value: 'Medium', label: 'Less Urgent', color: 'bg-[#F59E0B] hover:bg-[#D97706]' },
+                { value: 'all', label: 'All', color: 'bg-[#3B82F6] hover:bg-[#2563EB]' },
+                { value: 'Self', label: 'Self Defined', color: 'bg-[#6366F1] hover:bg-[#4F46E5]' },
+                { value: 'Daily', label: 'Daily Task', color: 'bg-[#16A34A] hover:bg-[#15803D]' }
+              ].map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={taskPriorityFilter === option.value}
+                  onClick={() => {
+                    setTaskPriorityFilter(option.value);
+                    setSelectedTaskIds([]);
+                  }}
+                  className={`flex min-h-[42px] items-center justify-center rounded-lg px-3 py-2 text-sm font-bold text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB] ${option.color}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="overflow-x-auto border border-[#E2E8F0]">
+              <table className="w-full min-w-[680px] table-fixed border-collapse text-left text-xs">
+                <colgroup>
+                  <col className="w-[4.5%]" />
+                  <col className="w-[46%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[35.5%]" />
+                </colgroup>
+                <thead>
+                  <tr className="h-10 border-b border-[#CBD5E1] bg-[#334155] text-[13px] font-bold text-white">
+                    <th className="p-2.5">
+                      <input
+                        type="checkbox"
+                        checked={allDirectorDashboardTasksSelected}
+                        onChange={event => setSelectedTaskIds(
+                          event.target.checked ? directorDashboardTaskIds : []
+                        )}
+                        className="cursor-pointer accent-[#2563EB]"
+                        aria-label="Select all visible tasks"
+                      />
+                    </th>
+                    <th className="p-2.5">Task / Subtask</th>
+                    <th className="p-2.5">Project</th>
+                    <th className="p-2.5">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E2E8F0]">
+                  {groupedDirectorDashboardTasks.flatMap(group => {
+                    const groupIds = new Set(group.items.map(taskKey));
+                    const rootTasks = group.items.filter(task =>
+                      !task.parentTaskId || !groupIds.has(String(task.parentTaskId))
+                    );
+
+                    return rootTasks.map(task => {
+                      const id = taskKey(task);
+                      const childTasks = getDirectorDashboardSubtasks(id, group.items);
+                      const relatedTasks = [task, ...childTasks];
+                      const selectableIds = relatedTasks
+                        .filter(item => item.status !== 'Completed' && !dailyCartIds.includes(taskKey(item)))
+                        .map(taskKey);
+                      const isSelected = selectableIds.length > 0 &&
+                        selectableIds.every(taskId => selectedTaskIds.includes(taskId));
+
+                      return (
+                        <tr key={id} className="bg-white even:bg-[#F8FAFC] hover:bg-[#F1F5F9]">
+                          <td className="p-2.5 align-middle">
+                            {selectableIds.length > 0 && (
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={event => setSelectedTaskIds(previous => {
+                                  const next = new Set(previous);
+                                  selectableIds.forEach(taskId => {
+                                    if (event.target.checked) next.add(taskId);
+                                    else next.delete(taskId);
+                                  });
+                                  return Array.from(next);
+                                })}
+                                className="cursor-pointer accent-[#2563EB]"
+                                aria-label={`Select ${task.title} and subtasks`}
+                              />
+                            )}
+                          </td>
+                          <td className="p-2.5 align-middle">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedTask(task); setPersonalTaskMode(false); setIsTaskModalOpen(true); }}
+                              className="block text-left text-sm font-bold leading-tight text-[#1E293B] hover:text-[#2563EB]"
+                            >
+                              {task.title}
+                            </button>
+                            {childTasks.map(child => (
+                              <button
+                                key={taskKey(child)}
+                                type="button"
+                                onClick={() => { setSelectedTask(child); setPersonalTaskMode(false); setIsTaskModalOpen(true); }}
+                                className="block max-w-full truncate text-left text-[11px] leading-[14px] text-[#334155] hover:text-[#2563EB]"
+                              >
+                                {child.title}
+                              </button>
+                            ))}
+                          </td>
+                          <td className="p-2.5 align-middle text-sm text-[#1E293B]">
+                            {group.projectName}
+                          </td>
+                          <td className="p-2.5 align-middle text-sm text-[#1E293B]">
+                            {task.description || '-'}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })}
+                  {groupedDirectorDashboardTasks.every(group => group.items.length === 0) && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-sm text-[#64748B]">
+                        No tasks match this category.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-0 flex flex-wrap gap-3 pt-12">
+              <button
+                type="button"
+                onClick={() => addTasksToDailyBoard(selectedDirectorDashboardTaskIds)}
+                disabled={selectedDirectorDashboardTaskIds.length === 0}
+                className="min-h-10 w-full rounded-lg bg-[#2563EB] px-6 py-2 text-sm font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50 sm:w-64"
+              >
+                Add to Daily Task Board
+              </button>
+              <button
+                type="button"
+                onClick={() => openCreateTask(true)}
+                className="min-h-10 w-full rounded-lg bg-[#6366F1] px-6 py-2 text-sm font-bold text-white transition hover:bg-[#4F46E5] sm:w-[198px]"
+              >
+                New Task +
+              </button>
+            </div>
+
+          </section>
+        )}
+
         {/* TAB 1: DASHBOARD OVERVIEW */}
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' && !isManagementDashboard && (
           <div className="order-2 space-y-6">
 
             {/* ACTION REQUIRED SECTION */}
@@ -2073,507 +2601,16 @@ const Dashboard: React.FC = () => {
 
         {/* TAB 2: DAILY TASK BOARD */}
         {activeTab === 'today-work' && (
-          <div className="space-y-5 min-w-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
-              <h2 className="text-2xl font-bold text-[#E00000]">Daily Task Board</h2>
-              <span className="rounded-lg border border-[#4472C4] px-3 py-2 text-sm font-semibold text-[#4472C4]">
-                {filteredDailyBoard.length} submitted {filteredDailyBoard.length === 1 ? 'entry' : 'entries'}
-              </span>
-            </div>
-
-            <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative min-w-[200px] flex-1">
-                  <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search task or action..."
-                  value={boardSearch}
-                  onChange={(e) => setBoardSearch(e.target.value)}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] py-2 pl-9 pr-3 text-xs font-medium text-[#0F172A] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-                </div>
-
-                <select
-                  value={boardEmployeeFilter}
-                  onChange={(e) => setBoardEmployeeFilter(e.target.value)}
-                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
-                >
-                  <option value="all">All Employees</option>
-                  {employees.map(e => (
-                    <option key={e.id || e._id} value={e.id || e._id}>{e.firstName} {e.lastName}</option>
-                  ))}
-                </select>
-
-                <select
-                  value={boardProjectFilter}
-                  onChange={(e) => setBoardProjectFilter(e.target.value)}
-                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
-                >
-                  <option value="all">All Projects</option>
-                  {projects.map(p => (
-                    <option key={p.id || p._id} value={p.id || p._id}>{p.projectName}</option>
-                  ))}
-                </select>
-
-                <input
-                  type="date"
-                  value={boardDateFilter}
-                  onChange={(e) => setBoardDateFilter(e.target.value)}
-                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
-                />
-
-                <select
-                  value={boardStatusFilter}
-                  onChange={(e) => setBoardStatusFilter(e.target.value)}
-                  className="rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#334155] focus:border-[#2563EB] focus:outline-none"
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="Completed">Completed</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Pending">Pending</option>
-                </select>
-
-                {boardFiltersActive && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBoardSearch('');
-                      setBoardDateFilter('');
-                      setBoardEmployeeFilter('all');
-                      setBoardProjectFilter('all');
-                      setBoardStatusFilter('all');
-                    }}
-                    className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
-                  >
-                    <RotateCcw size={13} />
-                    Reset
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <section className="overflow-hidden rounded-xl border border-[#4472C4] bg-white shadow-sm" aria-label="Tasks added from Dashboard">
-              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#4472C4] px-4 py-3 text-white">
-                <div>
-                  <h3 className="text-base font-bold">Daily Task Board</h3>
-                  <p className="mt-0.5 text-xs text-blue-100">
-                    All tasks added from Dash Board appear here with comments. Edit Priority / Employee / reminders if required, then submit with the next comment.
-                  </p>
-                </div>
-                <span className="rounded border border-white/50 px-2.5 py-1 text-xs font-bold">
-                  {cartTasks.length} {cartTasks.length === 1 ? 'task' : 'tasks'}
-                </span>
-              </div>
-
-              {cartTasks.length === 0 ? (
-                <p className="bg-[#E8EBF5] px-4 py-8 text-center text-sm text-[#64748B]">
-                  Select tasks on Dash Board and choose “Add to Daily Task Board” to review them here.
-                </p>
-              ) : (
-                <div className="w-full overflow-x-auto">
-                  <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-xs">
-                    <colgroup>
-                      <col className="w-[22%]" />
-                      <col className="w-[28%]" />
-                      <col className="w-[15%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[11%]" />
-                    </colgroup>
-                    <thead>
-                      <tr className="bg-[#4472C4] text-white">
-                        <th className="border border-white px-3 py-2.5">Task / Project</th>
-                        <th className="border border-white px-3 py-2.5">Comments / Next Comment</th>
-                        <th className="border border-white px-3 py-2.5">Employee</th>
-                        <th className="border border-white px-3 py-2.5">Priority</th>
-                        <th className="border border-white px-3 py-2.5">Reminder</th>
-                        <th className="border border-white px-3 py-2.5 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cartTasks.map((task, index) => {
-                        const id = taskKey(task);
-                        const edit = boardEdits[id] || {
-                          priority: task.priority,
-                          assignedEmployeeIds: [...(task.assignedEmployeeIds || [])],
-                          reminderDate: (task.reminderDate || task.dueDate || '').substring(0, 10),
-                          comment: ''
-                        };
-                        const previousComments = (task.comments || []).slice(-3);
-                        const legacyComment = task.directorRemark || task.projectHeadRemark;
-                        return (
-                          <tr key={id} className={index % 2 === 0 ? 'bg-[#E8EBF5]' : 'bg-[#F2F4F9]'}>
-                            <td className="border border-white px-3 py-3 align-top">
-                              <p className="font-bold text-[#172554]">{task.title}</p>
-                              <p className="mt-1 text-[11px] text-[#64748B]">{task.projectName || 'Project'}</p>
-                              <button
-                                type="button"
-                                onClick={() => setDailyCartIds(prev => prev.filter(item => item !== id))}
-                                className="mt-2 text-[11px] font-semibold text-rose-700 underline hover:text-rose-900"
-                              >
-                                Remove from board
-                              </button>
-                            </td>
-                            <td className="border border-white px-3 py-3 align-top">
-                              <div className="mb-2 max-h-28 space-y-1.5 overflow-y-auto">
-                                {previousComments.length > 0 ? previousComments.map(comment => (
-                                  <p key={comment.id} className="break-words text-[11px] leading-relaxed text-[#475569]">
-                                    <span className="font-bold text-[#334155]">{comment.userName || comment.role}:</span>{' '}
-                                    {comment.content}
-                                  </p>
-                                )) : legacyComment ? (
-                                  <p className="break-words text-[11px] leading-relaxed text-[#475569]">
-                                    <span className="font-bold text-[#334155]">Previous comment:</span> {legacyComment}
-                                  </p>
-                                ) : (
-                                  <p className="text-[11px] italic text-[#64748B]">No comments yet.</p>
-                                )}
-                              </div>
-                              <textarea
-                                rows={2}
-                                aria-label={`Next comment for ${task.title}`}
-                                placeholder="Next comment..."
-                                value={edit.comment}
-                                onChange={(e) => setBoardEdits(prev => ({
-                                  ...prev,
-                                  [id]: { ...edit, comment: e.target.value }
-                                }))}
-                                className="w-full resize-y border border-slate-300 bg-white px-2.5 py-2 text-xs text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#4472C4]"
-                              />
-                            </td>
-                            <td className="border border-white px-3 py-3 align-top">
-                              <div role="group" aria-label={`Employees for ${task.title}`} className="max-h-32 space-y-1 overflow-y-auto border border-slate-300 bg-white p-2">
-                                {employees.filter(e => e.status !== 'Inactive' && e.role === 'Employee').map(emp => {
-                                  const employeeId = String(emp.id || emp._id);
-                                  const checked = edit.assignedEmployeeIds.includes(employeeId);
-                                  return (
-                                    <label key={employeeId} className="flex items-start gap-1.5 text-[11px] leading-tight text-[#334155]">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={checked && edit.assignedEmployeeIds.length === 1}
-                                        onChange={event => setBoardEdits(prev => ({
-                                          ...prev,
-                                          [id]: {
-                                            ...edit,
-                                            assignedEmployeeIds: event.target.checked
-                                              ? Array.from(new Set([...edit.assignedEmployeeIds, employeeId]))
-                                              : edit.assignedEmployeeIds.filter(selectedId => selectedId !== employeeId)
-                                          }
-                                        }))}
-                                        className="mt-0.5 accent-[#4472C4]"
-                                      />
-                                      <span>{emp.firstName} {emp.lastName}</span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            </td>
-                            <td className="border border-white px-3 py-3 align-top">
-                              <select
-                                aria-label={`Priority for ${task.title}`}
-                                value={edit.priority}
-                                onChange={(e) => setBoardEdits(prev => ({
-                                  ...prev,
-                                  [id]: { ...edit, priority: e.target.value as TaskPriority }
-                                }))}
-                                className="w-full border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-[#334155]"
-                              >
-                                <option value="Urgent">Urgent</option>
-                                <option value="Medium">Less Urgent</option>
-                                <option value="Daily">Daily Task</option>
-                                <option value="Self">Self-define</option>
-                                <option value="Low">Low Urgent</option>
-                              </select>
-                            </td>
-                            <td className="border border-white px-3 py-3 align-top">
-                              <input
-                                type="date"
-                                aria-label={`Reminder date for ${task.title}`}
-                                value={edit.reminderDate}
-                                onChange={(e) => setBoardEdits(prev => ({
-                                  ...prev,
-                                  [id]: { ...edit, reminderDate: e.target.value }
-                                }))}
-                                className="w-full border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-[#334155]"
-                              />
-                            </td>
-                            <td className="border border-white px-3 py-3 text-center align-top">
-                              <button
-                                type="button"
-                                disabled={cartSubmittingId === id || !edit.comment.trim()}
-                                onClick={() => void handleSubmitDailyBoardUpdate(task)}
-                                className="w-full border border-[#C55A11] bg-[#ED7D31] px-2 py-2 text-xs font-bold text-white transition hover:bg-[#C55A11] disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {cartSubmittingId === id ? 'Submitting...' : 'Submit'}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-
-            {filteredDailyBoard.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center space-y-2">
-                <CalendarCheck size={40} className="mx-auto text-slate-300" />
-                <p className="text-sm font-bold text-[#0F172A]">No daily work entries found matching filters.</p>
-                <p className="text-xs text-[#64748B]">Entries appear here as soon as employees submit their daily work.</p>
-              </div>
-            ) : (
-              <div className="max-w-full overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-sm">
-                <div className="max-h-[680px] max-w-full overflow-auto overscroll-x-contain">
-                  <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-xs 2xl:min-w-0">
-                    <colgroup>
-                      <col className="w-[16%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[19%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[9%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[7%]" />
-                      <col className="w-[11%]" />
-                    </colgroup>
-                    <thead className="sticky top-0 z-10">
-                      <tr className="bg-[#4472C4] text-[11px] font-bold uppercase tracking-wider text-white">
-                        <th className="px-2.5 py-3">Task</th>
-                        <th className="px-2.5 py-3">Description</th>
-                        <th className="bg-[#047857] px-2.5 py-3">Action Taken</th>
-                        <th className="px-2.5 py-3">{isProjectHead ? 'Reviewed By' : 'Employee'}</th>
-                        <th className="px-2.5 py-3">Priority</th>
-                        <th className="px-2.5 py-3">Reminder</th>
-                        <th className="px-2.5 py-3">Date</th>
-                        <th className="bg-[#047857] px-2.5 py-3 text-center">Time</th>
-                        <th className="px-2.5 py-3">Flag &amp; Status</th>
-                      </tr>
-                  </thead>
-                    <tbody>
-                      {groupedDailyBoard.map(group => {
-                        const groupHours = group.items.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
-                        return (
-                          <React.Fragment key={group.projectId || group.projectName}>
-                            <tr className="bg-gradient-to-r from-[#DBEAFE] to-[#EEF2FF]">
-                              <td colSpan={9} className="px-4 py-2.5 border-y border-blue-200">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <FolderOpen size={15} className="text-[#1D4ED8]" />
-                                    <span className="text-sm font-extrabold text-[#1E3A8A]">{projectHeading(group)}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-[11px] font-bold">
-                                    <span className="rounded-full bg-white px-2.5 py-0.5 text-[#1D4ED8] ring-1 ring-blue-200">
-                                      {group.items.length} {group.items.length === 1 ? 'entry' : 'entries'}
-                            </span>
-                                    <span className="rounded-full bg-white px-2.5 py-0.5 text-emerald-700 ring-1 ring-emerald-200">
-                                      {formatHoursMinutes(groupHours)} hrs
-                                    </span>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                            {group.items.map((entry, index) => {
-                              const entryId = String(entry.id || entry._id || '');
-                              const parent = boardParentOf(entry.taskId);
-                              const relatedTask = taskById.get(String(entry.taskId));
-                              const entryRating = privateRatings.find(rating =>
-                                String(rating.taskId) === String(entry.taskId) &&
-                                String(rating.employeeId) === String(entry.employeeId)
-                              );
-                              const showParentRow = Boolean(parent) &&
-                                (index === 0 || boardMainIdOf(group.items[index - 1].taskId) !== boardMainIdOf(entry.taskId));
-                              return (
-                              <React.Fragment key={entry.id || entry._id}>
-                              {showParentRow && parent && (
-                                <tr className="border-b border-[#E2E8F0] bg-slate-50">
-                                  <td colSpan={9} className="px-4 py-2 pl-6">
-                                    <p className="break-words text-[13px] font-extrabold text-[#0F172A]">
-                                      {parent.title}
-                                    </p>
-                                  </td>
-                                </tr>
-                              )}
-                              <tr
-                                className={`border-b border-[#E2E8F0] align-top transition hover:bg-slate-50 ${entry.flagged ? 'bg-orange-50/60' : 'bg-white'}`}
-                              >
-                                <td className={`py-3.5 pr-4 ${parent ? 'pl-12' : 'pl-6'} ${entry.flagged ? 'border-l-4 border-l-orange-400' : 'border-l-4 border-l-transparent'}`}>
-                                  <div className="flex items-start justify-between gap-2">
-                                    <p className={`break-words text-[13px] text-[#0F172A] ${parent ? 'font-semibold' : 'font-extrabold'}`}>
-                                      {parent && <span className="mr-1.5 text-slate-400">-</span>}
-                                      {entry.taskTitle}
-                                    </p>
-                                    {entry.status === 'Completed' && relatedTask && entry.employeeId && entry.taskId !== 'OFFICE_WORK' && (
-                                      <button
-                                        type="button"
-                                        title={`Rate ${entry.taskTitle} for ${entry.employeeName || 'Employee'}`}
-                                        aria-label={`Rate ${entry.taskTitle} for ${entry.employeeName || 'Employee'}`}
-                                        onClick={() => openPrivateRating(relatedTask, String(entry.employeeId))}
-                                        className={`inline-flex flex-shrink-0 items-center gap-1 rounded-md p-1 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
-                                          entryRating ? 'text-[#D97706]' : 'text-amber-600'
-                                        }`}
-                                      >
-                                        <Star size={16} className={entryRating ? 'fill-[#D97706]' : ''} />
-                                        {entryRating && <span className="text-[10px] font-extrabold">{entryRating.rating}/5</span>}
-                                      </button>
-                                    )}
-                                  </div>
-                        </td>
-                                <td className="px-2.5 py-3.5">
-                                  <p className="whitespace-pre-wrap break-words leading-relaxed text-[#64748B]">{entry.details || '-'}</p>
-                                </td>
-                                <td className="bg-emerald-50/50 px-2.5 py-3.5">
-                                  {isDirector && editingDailyCommentId === entryId ? (
-                                    <div className="space-y-2">
-                                      <textarea
-                                        rows={3}
-                                        value={dailyCommentDraft}
-                                        onChange={event => setDailyCommentDraft(event.target.value)}
-                                        className="w-full resize-y rounded-lg border border-emerald-300 bg-white px-2.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                        aria-label={`Edit comment for ${entry.taskTitle}`}
-                                      />
-                                      <div className="flex gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => void saveDailyComment(entry)}
-                                          disabled={savingDailyCommentId === entryId}
-                                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:opacity-60"
-                                        >
-                                          <Save size={12} />
-                                          {savingDailyCommentId === entryId ? 'Saving...' : 'Save'}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={cancelEditingDailyComment}
-                                          disabled={savingDailyCommentId === entryId}
-                                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
-                                        >
-                                          <X size={12} />
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <p className="whitespace-pre-wrap break-words font-semibold leading-relaxed text-[#064E3B]">{entry.actionTaken || '-'}</p>
-                                      {isDirector && (
-                                        <button
-                                          type="button"
-                                          onClick={() => startEditingDailyComment(entry)}
-                                          className="mt-1 rounded-md px-1.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100"
-                                        >
-                                          Edit comment
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                  {entry.commentLastEditedByName && (
-                                    <p className="mt-1 text-[10px] font-medium text-slate-500" title={entry.commentLastEditedAt ? new Date(entry.commentLastEditedAt).toLocaleString() : undefined}>
-                                      Edited by {entry.commentLastEditedByName}
-                                    </p>
-                                  )}
-                                  {!!entry.attachments?.length && (
-                                    <div className="mt-2 flex flex-col items-start gap-1">
-                                      {entry.attachments.map(attachment => (
-                                        <a
-                                          key={attachment.id}
-                                          href={`/api/daily-entries/${entryId}/attachments/${attachment.id}`}
-                                          download={attachment.fileName}
-                                          className="inline-flex max-w-full items-center gap-1 break-all text-[11px] font-semibold text-blue-700 underline"
-                                        >
-                                          <Paperclip size={12} className="shrink-0" />
-                                          {attachment.fileName}
-                                        </a>
-                                      ))}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-2.5 py-3.5">
-                                  {isProjectHead ? (
-                                    entry.reviewedByName ? (
-                                      <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
-                                        <UserCheck size={13} className="shrink-0" />
-                                        <span className="truncate">{entry.reviewedByName}</span>
-                                      </span>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleReviewDailyEntry(entry)}
-                                        disabled={reviewingDailyEntryId === String(entry.id || entry._id || '')}
-                                        className="rounded-lg bg-[#2563EB] px-2.5 py-1.5 text-[11px] font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-wait disabled:opacity-60"
-                                      >
-                                        {reviewingDailyEntryId === String(entry.id || entry._id || '') ? 'Saving...' : 'Mark Reviewed'}
-                                      </button>
-                                    )
-                                  ) : (
-                                    <div className="flex min-w-0 items-center gap-2">
-                                      <EmployeeAvatar name={entry.employeeName || 'Staff'} size="sm" />
-                                      <span className="truncate font-bold text-[#334155]">{entry.employeeName || '-'}</span>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-2.5 py-3.5">
-                                  {relatedTask?.priority
-                                    ? <PriorityBadge priority={relatedTask.priority} />
-                                    : <span className="text-slate-400">-</span>}
-                                </td>
-                                <td className="px-2.5 py-3.5">
-                                  {relatedTask?.reminderDate
-                                    ? <p className="whitespace-nowrap font-semibold text-[#334155]">{formatBoardDay(relatedTask.reminderDate)}</p>
-                                    : <span className="text-slate-400">No reminder</span>}
-                                </td>
-                                <td className="px-2.5 py-3.5">
-                                  <p className="whitespace-nowrap font-bold text-[#0F172A]">{formatBoardDay(entry.date)}</p>
-                                  <p className="text-[11px] font-medium text-[#94A3B8]">{formatBoardWeekday(entry.date)}</p>
-                                </td>
-                                <td className="bg-emerald-50/50 px-2.5 py-3.5 text-center">
-                                  <span className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2 py-1 text-xs font-extrabold text-white shadow-xs">
-                                    <Clock size={12} />
-                                    {formatHoursMinutes(entry.hours)}
-                                  </span>
-                                </td>
-                                <td className="px-2.5 py-3.5">
-                                  <div className="flex flex-col items-start gap-1.5">
-                                    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${
-                                      entry.status === 'Completed'
-                                        ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
-                                        : entry.status === 'In Progress'
-                                          ? 'border-blue-300 bg-blue-100 text-blue-800'
-                                          : 'border-slate-300 bg-slate-100 text-slate-700'
-                                    }`}>
-                                      {entry.status === 'Completed' ? <CheckCircle2 size={12} /> : <Clock size={12} />}
-                            {entry.status || 'Submitted'}
-                          </span>
-                                    {entry.flagged ? (
-                                      <div className="w-full rounded-lg border border-orange-300 bg-orange-100/80 px-2 py-1.5">
-                                        <span className="flex items-center gap-1 text-[11px] font-extrabold text-orange-800">
-                                          <FlagIcon size={12} />
-                                          Flagged
-                                        </span>
-                                        {entry.flagComment && (
-                                          <p className="mt-0.5 break-words text-[11px] font-medium leading-snug text-orange-900">{entry.flagComment}</p>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="text-[11px] font-semibold text-slate-400">No flag</span>
-                                    )}
-                                  </div>
-                        </td>
-                      </tr>
-                              </React.Fragment>
-                              );
-                            })}
-                          </React.Fragment>
-                        );
-                      })}
-                  </tbody>
-                </table>
-                </div>
-              </div>
-              )}
-          </div>
+          <DailyTaskBoardView
+            user={user}
+            role={isDirector ? 'Director' : 'Project Head'}
+            tasks={tasks}
+            dailyEntries={dailyEntries}
+            initialCartIds={dailyCartIds}
+            onCartChange={setDailyCartIds}
+            onRefresh={fetchData}
+            showToast={showToast}
+          />
         )}
 
         {/* TAB 3: MY TASKS (Director Assigned Tasks) */}
@@ -2585,7 +2622,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-[#64748B]">Tasks assigned specifically to you as Director</p>
               </div>
               <button
-                onClick={openCreateTask}
+                onClick={() => openCreateTask(isDirector)}
                 className="flex items-center gap-1.5 px-3.5 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold rounded-lg text-xs transition cursor-pointer"
               >
                 <Plus size={14} />
@@ -2593,7 +2630,7 @@ const Dashboard: React.FC = () => {
               </button>
             </div>
 
-            {myDirectorTasks.length === 0 ? (
+            {myPersonalTasks.length === 0 ? (
               <div className="py-12 text-center text-slate-400 space-y-2">
                 <CheckSquare size={36} className="mx-auto text-slate-300" />
                 <p className="text-sm font-bold text-[#0F172A]">No tasks directly assigned to you.</p>
@@ -2746,7 +2783,10 @@ const Dashboard: React.FC = () => {
               onEmployeeFilterChange={setCompletedEmployeeFilter}
               onTimeFilterChange={setCompletedTimeFilter}
               onTimeDateChange={setCompletedTimeDate}
-              onShiftBack={() => setActiveTab('overview')}
+              onShiftTaskBack={handleRestoreCompletedTask}
+              canEditLog={isDirector}
+              onUpdateDailyEntry={handleUpdateCompletedLog}
+              onDeleteDailyEntry={handleDeleteCompletedLog}
             />
           ) : (
           <div className="bg-white rounded-[14px] border border-[#E2E8F0] p-6 shadow-xs space-y-6">
@@ -3075,13 +3115,22 @@ const Dashboard: React.FC = () => {
         )}
 
         {/* TAB: PERFORMANCE */}
-        {activeTab === 'performance' && (
-          <div className="space-y-5 rounded-[14px] border border-[#E2E8F0] bg-white p-5 shadow-xs md:p-6">
+        {activeTab === 'performance' && isDirector && (
+          <div className="rounded-[14px] border border-[#E2E8F0] bg-white p-5 shadow-xs md:p-6">
+            <DirectorPerformanceReview
+              employees={employees}
+              performanceData={performanceData}
+              tasks={tasks}
+            />
+          </div>
+        )}
+        {activeTab === 'performance' && !isDirector && (
+          <div className={`space-y-5 ${isProjectHead ? '' : 'rounded-[14px] border border-[#E2E8F0] bg-white p-5 shadow-xs md:p-6'}`}>
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <h3 className="text-xl font-bold text-[#0F172A]">Performance</h3>
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
-                  <span>View:</span>
+                  <span>{isProjectHead ? 'Time:' : 'View:'}</span>
                   <select
                     value={perfView}
                     onChange={event => setPerfView(event.target.value as 'week' | 'month' | 'year')}
@@ -3092,40 +3141,17 @@ const Dashboard: React.FC = () => {
                     <option value="year">Year</option>
                   </select>
                 </label>
-                <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
-                  <span>Project:</span>
-                  <select
-                    value={perfProjectFilter}
-                    onChange={event => {
-                      setPerfProjectFilter(event.target.value);
-                      setWeeklyRatingDrafts({});
-                    }}
-                    className="min-w-36 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
-                  >
-                    <option value="all">All projects</option>
-                    {projects.map(project => (
-                      <option key={String(project.id || project._id)} value={String(project.id || project._id)}>
-                        {project.projectName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
                 {perfView === 'week' ? (
                   <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
                     <span>Week starting:</span>
                     <input
                       type="date"
-                      value={isDirector && !hasSelectedPerformanceWeek ? '' : performanceWeekStart}
+                      value={performanceWeekStart}
                       onChange={event => {
-                        if (!event.target.value) {
-                          setHasSelectedPerformanceWeek(false);
-                          setWeeklyRatingDrafts({});
-                          return;
-                        }
+                        if (!event.target.value) return;
                         const weekStart = getWeekStartDate(event.target.value);
                         if (!weekStart) return;
                         setPerformanceWeekStart(weekStart);
-                        setHasSelectedPerformanceWeek(true);
                         setWeeklyRatingDrafts({});
                       }}
                       aria-label="Select a week, starting Monday"
@@ -3157,32 +3183,70 @@ const Dashboard: React.FC = () => {
                     />
                   </label>
                 )}
+                {isProjectHead && (
+                  <label className="flex items-center gap-2 text-sm font-medium text-[#334155]">
+                    <span>Employee:</span>
+                    <select
+                      value={perfEmployeeFilter}
+                      onChange={event => setPerfEmployeeFilter(event.target.value)}
+                      aria-label="Filter performance by employee"
+                      className="rounded-md border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB]"
+                    >
+                      <option value="all">All</option>
+                      {employees.filter(employee => employee.status === 'Active' || !employee.status).map(employee => (
+                        <option key={String(employee.id || employee._id)} value={String(employee.id || employee._id)}>
+                          {employee.firstName} {employee.lastName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
             </div>
 
             <div className="overflow-x-auto rounded-lg border border-[#E2E8F0]">
-              <table className="w-full min-w-[900px] table-fixed border-collapse text-left">
+              <table className={`w-full ${isProjectHead ? 'min-w-[760px]' : 'min-w-[900px]'} table-fixed border-collapse text-left`}>
                 <colgroup>
-                  <col className="w-[16%]" />
-                  <col className="w-[20%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[23%]" />
-                  <col className="w-[27%]" />
+                  {isProjectHead ? (
+                    <>
+                      <col className="w-[22%]" />
+                      <col className="w-[36%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[16%]" />
+                    </>
+                  ) : (
+                    <>
+                      <col className="w-[15%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[17%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      {isDirector && <col className="w-[11%]" />}
+                    </>
+                  )}
                 </colgroup>
                 <thead>
                   <tr className="bg-[#1E293B] text-xs font-semibold text-white">
                     <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Employee</th>
                     <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Tasks done</th>
-                    <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Hours logged</th>
-                    <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Employee submissions &amp; comments</th>
-                    <th className="whitespace-nowrap px-2 py-3">Weekly marks (/10)</th>
+                    <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Work hours</th>
+                    <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Free hours</th>
+                    {!isProjectHead && <th className="whitespace-nowrap border-r border-slate-500 px-3 py-3">Employee submissions &amp; comments</th>}
+                    {!isProjectHead && <th className="whitespace-nowrap border-r border-slate-500 px-2 py-3">Self marks (/10)</th>}
+                    {isDirector && (
+                      <th className="whitespace-nowrap border-r border-slate-500 px-2 py-3">Co-ordinator marks (/10)</th>
+                    )}
+                    <th className="whitespace-nowrap px-2 py-3">{isDirector ? 'Director marks (/10)' : 'Co-ordinator marks (/10)'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2E8F0] text-sm">
                   {performanceRows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-[#64748B]">
-                        No performance data available for the selected project.
+                      <td colSpan={isProjectHead ? 5 : isDirector ? 8 : 7} className="px-4 py-10 text-center text-sm text-[#64748B]">
+                        No performance data available for this period.
                       </td>
                     </tr>
                   ) : performanceRows.map(employee => {
@@ -3194,13 +3258,31 @@ const Dashboard: React.FC = () => {
                     const employeeId = String(employee.employeeId);
                     const taskCount = metrics?.taskCount ?? metrics?.workDone ?? 0;
                     const workHours = metrics?.workHours ?? 0;
+                    const freeHours = metrics?.freeHours ?? 0;
+                    const submittedTaskNames = Array.from(new Set(
+                      employeeSubmissions.map(entry => entry.taskTitle?.trim()).filter((title): title is string => Boolean(title))
+                    ));
+                    const currentMark = isDirector ? weeklyMark?.rating : weeklyMark?.coordinatorRating;
+                    const currentComment = isDirector ? weeklyMark?.comment : weeklyMark?.coordinatorComment;
                     return (
                       <React.Fragment key={employeeId}>
                       <tr className="text-[#334155] hover:bg-[#F8FAFC]">
                         <td className="border-r border-[#E2E8F0] px-3 py-4 font-semibold text-[#0F172A]">{employee.employeeName || 'Employee'}</td>
-                        <td className="border-r border-[#E2E8F0] px-3 py-4 text-base font-semibold">{taskCount}</td>
-                        <td className="border-r border-[#E2E8F0] px-3 py-4">{formatHoursMinutes(workHours)}</td>
                         <td className="border-r border-[#E2E8F0] px-3 py-4">
+                          <details className="text-sm">
+                            <summary className={`cursor-pointer font-semibold ${isProjectHead ? 'text-red-600' : 'text-[#1D4ED8]'}`}>{taskCount} ▾</summary>
+                            {submittedTaskNames.length > 0 ? (
+                              <ul className="mt-2 list-inside list-disc space-y-1 text-xs text-[#475569]">
+                                {submittedTaskNames.map(title => <li key={title}>{title}</li>)}
+                              </ul>
+                            ) : (
+                              <p className="mt-2 text-xs text-[#64748B]">No task names logged for this period.</p>
+                            )}
+                          </details>
+                        </td>
+                        <td className="border-r border-[#E2E8F0] px-3 py-4">{formatHoursMinutes(workHours)}</td>
+                        <td className="border-r border-[#E2E8F0] px-3 py-4">{formatHoursMinutes(freeHours)}</td>
+                        {!isProjectHead && <td className="border-r border-[#E2E8F0] px-3 py-4">
                           <button
                             type="button"
                             onClick={() => setExpandedPerformanceEmployeeId(
@@ -3211,43 +3293,48 @@ const Dashboard: React.FC = () => {
                           >
                             {expandedPerformanceEmployeeId === employeeId ? 'Hide' : 'View'} {employeeSubmissions.length} {employeeSubmissions.length === 1 ? 'submission' : 'submissions'}
                           </button>
-                        </td>
+                        </td>}
+                        {!isProjectHead && <td className="border-r border-[#E2E8F0] px-2 py-3 text-xs">
+                          {weeklyMark?.selfRating ? (
+                            <div>
+                              <span className="font-bold text-[#0F172A]">{weeklyMark.selfRating}/10</span>
+                              {weeklyMark.selfComment && <p className="mt-1 text-[11px] text-[#64748B]">{weeklyMark.selfComment}</p>}
+                            </div>
+                          ) : '—'}
+                        </td>}
+                        {isDirector && (
+                          <td className="border-r border-[#E2E8F0] px-2 py-3 text-xs">
+                            {weeklyMark?.coordinatorRating ? (
+                              <div>
+                                <span className="font-bold text-[#0F172A]">{weeklyMark.coordinatorRating}/10</span>
+                                {weeklyMark.coordinatorComment && <p className="mt-1 text-[11px] text-[#64748B]">{weeklyMark.coordinatorComment}</p>}
+                              </div>
+                            ) : '—'}
+                          </td>
+                        )}
                         <td className="px-2 py-3 text-xs">
                           {perfView !== 'week' ? (
                             <span className="text-[#64748B]">Switch to Week view to rate</span>
-                          ) : perfProjectFilter === 'all' ? (
-                            <span className="text-[#64748B]">Select a project to rate</span>
-                          ) : isDirector && !hasSelectedPerformanceWeek ? (
-                            <span className="text-[#64748B]">Select a week to rate</span>
-                          ) : weeklyMark ? (
+                          ) : typeof currentMark === 'number' ? (
                             <div>
-                              <span className="font-bold text-[#0F172A]">{getWeeklyMarkScore(weeklyMark)}/10</span>
-                              {weeklyMark.comment?.trim() && (
-                                <p className="mt-1 whitespace-pre-wrap text-[11px] text-[#64748B]">
-                                  {weeklyMark.comment}
-                                </p>
-                              )}
+                              <span className={`font-bold ${isProjectHead ? 'text-red-600' : 'text-[#0F172A]'}`}>{currentMark}/10</span>
+                              {currentComment && <p className="mt-1 text-[11px] text-[#64748B]">{currentComment}</p>}
                             </div>
-                          ) : isDirector ? (
+                          ) : (
                             <div className="space-y-2">
                               <label className="block text-[10px] font-semibold text-[#64748B]">
-                                Weekly Rating (1–10)
+                                {isDirector ? 'Director rating (1–10)' : 'Co-ordinator rating (1–10)'}
                                 <select
-                                  value={weeklyRatingDrafts[String(employee.employeeId)]?.rating || ''}
+                                  value={weeklyRatingDrafts[employeeId]?.rating || ''}
                                   onChange={event => setWeeklyRatingDrafts(previous => ({
                                     ...previous,
-                                    [String(employee.employeeId)]: {
+                                    [employeeId]: {
                                       rating: event.target.value,
-                                      comment: previous[String(employee.employeeId)]?.comment || ''
+                                      comment: previous[employeeId]?.comment || ''
                                     }
                                   }))}
-                                  disabled={
-                                    perfProjectFilter === 'all' ||
-                                    !hasSelectedPerformanceWeek ||
-                                    loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` ||
-                                    savingPerformanceMark
-                                  }
-                                  className="mt-1 block w-full rounded-lg border border-[#CBD5E1] bg-white px-2 py-2 text-sm text-[#0F172A] outline-none focus:border-[#2563EB] disabled:cursor-not-allowed disabled:bg-[#F1F5F9]"
+                                  disabled={loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` || savingPerformanceMark}
+                                  className={`mt-1 block w-full rounded-lg border bg-white px-2 py-2 text-sm outline-none disabled:cursor-not-allowed disabled:bg-[#F1F5F9] ${isProjectHead ? 'border-red-400 text-red-600 focus:border-red-500' : 'border-[#CBD5E1] text-[#0F172A] focus:border-[#2563EB]'}`}
                                 >
                                   <option value="">Select rating</option>
                                   {Array.from({ length: 10 }, (_, index) => index + 1).map(rating => (
@@ -3257,31 +3344,26 @@ const Dashboard: React.FC = () => {
                               </label>
                               <input
                                 type="text"
-                                value={weeklyRatingDrafts[String(employee.employeeId)]?.comment || ''}
+                                value={weeklyRatingDrafts[employeeId]?.comment || ''}
                                 onChange={event => setWeeklyRatingDrafts(previous => ({
                                   ...previous,
-                                  [String(employee.employeeId)]: {
-                                    rating: previous[String(employee.employeeId)]?.rating || '',
+                                  [employeeId]: {
+                                    rating: previous[employeeId]?.rating || '',
                                     comment: event.target.value
                                   }
                                 }))}
-                                disabled={
-                                  perfProjectFilter === 'all' ||
-                                  !hasSelectedPerformanceWeek ||
-                                  loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` ||
-                                  savingPerformanceMark
-                                }
-                                placeholder="Director comment (optional)"
+                                disabled={loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` || savingPerformanceMark}
+                                placeholder="Comment (optional)"
                                 aria-label={`Optional weekly comment for ${employee.employeeName || 'employee'}`}
-                                className="block w-full rounded-lg border border-[#CBD5E1] bg-white px-2 py-1.5 text-xs text-[#0F172A] outline-none focus:border-[#2563EB] disabled:cursor-not-allowed disabled:bg-[#F1F5F9]"
+                                className={`block w-full rounded-lg border bg-white px-2 py-1.5 text-xs outline-none disabled:cursor-not-allowed disabled:bg-[#F1F5F9] ${isProjectHead ? 'border-red-400 text-red-600 focus:border-red-500' : 'border-[#CBD5E1] text-[#0F172A] focus:border-[#2563EB]'}`}
                               />
                             </div>
-                          ) : '—'}
+                          )}
                         </td>
                       </tr>
                       {expandedPerformanceEmployeeId === employeeId && (
                         <tr className="bg-[#F8FAFC]">
-                          <td colSpan={5} className="border-t border-[#E2E8F0] px-4 py-4">
+                          <td colSpan={isProjectHead ? 5 : isDirector ? 8 : 7} className="border-t border-[#E2E8F0] px-4 py-4">
                             {employeeSubmissions.length === 0 ? (
                               <p className="text-sm text-[#64748B]">No employee submissions for this period and project.</p>
                             ) : (
@@ -3331,35 +3413,32 @@ const Dashboard: React.FC = () => {
               </table>
             </div>
 
-            {isDirector && perfView === 'week' && (
+            {(isDirector || isProjectHead) && perfView === 'week' && (
               <button
                 type="button"
                 onClick={() => void handleSubmitWeeklyMarks()}
                 disabled={
                   performanceRows.length === 0 ||
-                  perfProjectFilter === 'all' ||
-                  !hasSelectedPerformanceWeek ||
                   loadedPerformanceMarksKey !== `${perfProjectFilter}:${performanceWeekStart}` ||
                   savingPerformanceMark ||
                   !performanceRows.some(employee =>
                     Boolean(weeklyRatingDrafts[String(employee.employeeId)]?.rating) &&
-                    !getWeeklyMark(String(employee.employeeId))
+                    (isDirector
+                      ? typeof getWeeklyMark(String(employee.employeeId))?.rating !== 'number'
+                      : typeof getWeeklyMark(String(employee.employeeId))?.coordinatorRating !== 'number')
                   )
                 }
                 className="rounded-lg bg-[#2563EB] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {savingPerformanceMark ? 'Submitting...' : 'Submit Weekly Marks'}
+                {savingPerformanceMark ? 'Submitting...' : 'Submit Saturday Marks'}
               </button>
             )}
 
-            <p className="text-xs text-[#64748B]">
-              {isDirector
-                ? 'In Week view, select a project and week to enter weekly ratings. Submitted ratings are locked and visible to employees and project heads.'
-                : 'Select Week view, a project, and a week to view submitted weekly ratings.'}
-            </p>
-            <p className="text-xs text-[#64748B]">
-              Showing {perfView} data for {performancePeriodStart} to {performancePeriodEnd}. Weekly ratings are scored out of 10.
-            </p>
+            {isDirector && (
+              <p className="text-xs text-[#64748B]">
+                Employees and Project Co-ordinators submit self-marks first. Review their marks and submit the Director mark for the selected week.
+              </p>
+            )}
           </div>
         )}
 
@@ -3368,12 +3447,260 @@ const Dashboard: React.FC = () => {
           <DirectorProfile />
         )}
 
+        {isDirectorTaskAllotmentView && (
+          <section id="dashboard-task-directory" className="space-y-4" aria-labelledby="task-allotment-title">
+            <h2 id="task-allotment-title" className="text-xl font-bold text-[#0F172A]">
+              Ongoing tasks of all employees and Project Head
+            </h2>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="relative">
+                <select
+                  aria-label="Filter tasks by time period"
+                  value={taskTimeFilter}
+                  onChange={event => {
+                    const mode = event.target.value as 'all' | 'date' | 'week' | 'month';
+                    setTaskTimeFilter(mode);
+                    if (mode !== 'all' && !taskTimeDate) setTaskTimeDate(todayDateStr);
+                  }}
+                  className="min-h-[38px] w-full appearance-none rounded-md border border-[#CBD5E1] bg-white px-2.5 py-2 pr-8 text-xs font-medium text-[#334155]"
+                >
+                  <option value="all">Time: All</option>
+                  <option value="date">Time: Date wise</option>
+                  <option value="week">Time: Week wise</option>
+                  <option value="month">Time: Month wise</option>
+                </select>
+                <ChevronDown aria-hidden="true" size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569]" />
+              </div>
+              <div className="relative">
+                <select
+                  aria-label="Filter tasks by priority"
+                  value={taskPriorityFilter}
+                  onChange={event => setTaskPriorityFilter(event.target.value)}
+                  className="min-h-[38px] w-full appearance-none rounded-md border border-[#CBD5E1] bg-white px-2.5 py-2 pr-8 text-xs font-medium text-[#334155]"
+                >
+                  <option value="all">Priority: All</option>
+                  <option value="Urgent">Priority: Urgent</option>
+                  <option value="Medium">Priority: Less Urgent</option>
+                  <option value="Daily">Priority: Daily Task</option>
+                  <option value="Self">Priority: Self-define</option>
+                  <option value="Low">Priority: Low Urgent</option>
+                </select>
+                <ChevronDown aria-hidden="true" size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569]" />
+              </div>
+              <div className="relative">
+                <select
+                  aria-label="Filter tasks by employee"
+                  value={taskEmployeeFilter}
+                  onChange={event => setTaskEmployeeFilter(event.target.value)}
+                  className="min-h-[38px] w-full appearance-none rounded-md border border-[#CBD5E1] bg-white px-2.5 py-2 pr-8 text-xs font-medium text-[#334155]"
+                >
+                  <option value="all">Employee: All</option>
+                  <option value="coordinator">Employee: Project Co-ordinator</option>
+                  {employees.filter(employee => employee.status === 'Active' || !employee.status).map(employee => (
+                    <option key={String(employee.id || employee._id)} value={String(employee.id || employee._id)}>
+                      Employee: {employee.firstName} {employee.lastName}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden="true" size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569]" />
+              </div>
+              <div className="relative">
+                <select
+                  aria-label="Filter tasks by project"
+                  value={taskProjectFilter}
+                  onChange={event => setTaskProjectFilter(event.target.value)}
+                  className="min-h-[38px] w-full appearance-none rounded-md border border-[#CBD5E1] bg-white px-2.5 py-2 pr-8 text-xs font-medium text-[#334155]"
+                >
+                  <option value="all">Project: All</option>
+                  {projects.map(project => (
+                    <option key={String(project.id || project._id)} value={String(project.id || project._id)}>
+                      Project: {project.projectName}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden="true" size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569]" />
+              </div>
+            </div>
+            {taskTimeFilter !== 'all' && (
+              <input
+                type="date"
+                aria-label={`Choose ${taskTimeFilter}`}
+                value={taskTimeDate}
+                onChange={event => setTaskTimeDate(event.target.value)}
+                className="min-h-[36px] rounded-md border border-[#CBD5E1] bg-white px-2.5 py-1.5 text-xs text-[#334155]"
+              />
+            )}
+
+            <div className="overflow-x-auto border border-[#E2E8F0] bg-white">
+              <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-xs">
+                <colgroup>
+                  <col className="w-[4%]" />
+                  <col className="w-[4.5%]" />
+                  <col className="w-[38%]" />
+                  <col className="w-[53.5%]" />
+                </colgroup>
+                <thead>
+                  <tr className="h-10 border-b border-[#CBD5E1] bg-[#334155] text-[13px] font-bold text-white">
+                    <th className="border-r border-white/20 px-2" aria-label="Select task" />
+                    <th className="border-r border-white/20 px-2 text-center" aria-label="Flag status">
+                      <FlagIcon size={13} className="mx-auto" />
+                    </th>
+                    <th className="border-r border-white/20 px-2.5">Task name and details</th>
+                    <th className="px-2.5">Latest 5 comments</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupedFilteredTasks.flatMap(group => {
+                    const groupIds = new Set(group.items.map(taskKey));
+                    const roots = group.items.filter(task =>
+                      !task.parentTaskId || !groupIds.has(String(task.parentTaskId))
+                    );
+                    return roots.map(rootTask => {
+                      const rootId = taskKey(rootTask);
+                      const subtasks = group.items.filter(task => String(task.parentTaskId || '') === rootId);
+                      const relatedTasks = [rootTask, ...subtasks];
+                      const isSelected = selectedTaskIds.includes(rootId);
+                      const isFlagged = relatedTasks.some(task =>
+                        task.flagStatus === 'Open' || flags.some(flag =>
+                          String(flag.taskId) === taskKey(task) && flag.status === 'Open'
+                        )
+                      );
+                      const latestComments = relatedTasks
+                        .flatMap(task => (task.comments || []).map(comment => ({
+                          ...comment,
+                          sourceTaskTitle: task.title
+                        })))
+                        .sort((first, second) =>
+                          new Date(first.timestamp || 0).getTime() - new Date(second.timestamp || 0).getTime()
+                        )
+                        .slice(-5)
+                        .reverse();
+
+                      return (
+                        <tr key={rootId} className="border-b border-[#E2E8F0] even:bg-[#F7F9FC]">
+                          <td className="border-r border-[#E2E8F0] px-2 text-center align-middle">
+                            {relatedTasks.some(task => task.status !== 'Completed') && (
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={event => setSelectedTaskIds(previous =>
+                                  event.target.checked
+                                    ? Array.from(new Set([...previous, rootId]))
+                                    : previous.filter(id => id !== rootId)
+                                )}
+                                className="cursor-pointer accent-[#2563EB]"
+                                aria-label={`Select ${rootTask.title}`}
+                              />
+                            )}
+                          </td>
+                          <td className="border-r border-[#E2E8F0] px-2 text-center align-top">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const flaggedTask = relatedTasks.find(task =>
+                                  flags.some(flag => String(flag.taskId) === taskKey(task) && flag.status === 'Open')
+                                ) || rootTask;
+                                setManagementFlagTask(flaggedTask);
+                                setManagementFlagTaskIds([taskKey(flaggedTask)]);
+                                setManagementFlagType('Progress Concern');
+                                setManagementFlagMessage(flags.find(flag =>
+                                  String(flag.taskId) === taskKey(flaggedTask) && flag.status === 'Open'
+                                )?.flagMessage || flaggedTask.flagMessage || '');
+                              }}
+                              title={isFlagged ? 'Open intervention flag' : 'Raise an intervention flag'}
+                              aria-label={`${isFlagged ? 'View or update' : 'Raise'} flag for ${rootTask.title}`}
+                              className={`mt-1 rounded px-1.5 py-1 ${isFlagged ? 'text-red-600' : 'text-slate-400 hover:text-red-600'}`}
+                            >
+                              <FlagIcon size={14} fill={isFlagged ? 'currentColor' : 'none'} />
+                            </button>
+                          </td>
+                          <td className="border-r border-[#E2E8F0] px-2.5 py-2 align-top text-[#172554]">
+                            <p className="font-bold leading-tight">
+                              {rootTask.projectName || group.projectName}/{rootTask.title}
+                            </p>
+                            {subtasks.map(subtask => (
+                              <p key={taskKey(subtask)} className="mt-0.5 break-words text-[11px] leading-tight text-[#334155]">
+                                {rootTask.projectName || group.projectName}/{rootTask.title}/{subtask.title}
+                              </p>
+                            ))}
+                            <p className="mt-0.5 whitespace-pre-wrap text-[11px] italic leading-tight text-[#64748B]">
+                              {rootTask.description || '-'}
+                            </p>
+                          </td>
+                          <td className="px-2.5 py-2 align-top text-[#0F172A]">
+                            {latestComments.length > 0 ? (
+                              <ol className="space-y-0.5">
+                                {latestComments.map((comment, index) => (
+                                  <li key={`${comment.id || index}-${comment.timestamp}`} className="break-words leading-tight">
+                                    {comment.content}
+                                    {comment.timestamp ? ` (${new Date(comment.timestamp).toLocaleString('en-GB', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: 'numeric',
+                                      minute: '2-digit',
+                                      hour12: true
+                                    })})` : ''}
+                                    {comment.userName ? ` (${comment.userName})` : ''}
+                                  </li>
+                                ))}
+                              </ol>
+                            ) : (
+                              <span className="text-[11px] italic text-[#94A3B8]">No comments yet.</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })}
+                  {groupedFilteredTasks.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-10 text-center text-sm text-[#64748B]">
+                        {loading ? 'Loading tasks…' : 'No tasks match these filters.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={selectedTaskIds.length !== 1}
+                onClick={() => {
+                  const selectedTask = tasks.find(task => taskKey(task) === selectedTaskIds[0]);
+                  if (!selectedTask) return;
+                  setSelectedTask(selectedTask);
+                  setIsTaskModalOpen(true);
+                }}
+                className="min-h-[38px] min-w-[217px] rounded-lg bg-[#2563EB] px-5 py-2 text-sm font-bold text-white hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Edit Task &gt;
+              </button>
+              <button
+                type="button"
+                onClick={() => openCreateTask()}
+                className="min-h-[38px] min-w-[198px] rounded-lg bg-[#6366F1] px-5 py-2 text-sm font-bold text-white hover:bg-[#4F46E5]"
+              >
+                New Task +
+              </button>
+            </div>
+
+          </section>
+        )}
+
         {/* DASHBOARD TASK DIRECTORY (also on overview) */}
-        {(activeTab === 'overview' || activeTab === 'tasks') && (
+        {(activeTab === 'overview' || activeTab === 'tasks') && !isDirectorTaskAllotmentView && !(isManagementDashboard && activeTab === 'overview') && (
           <div
             id="dashboard-task-directory"
             className={`order-1 space-y-4 ${isManagementDashboard ? '' : 'rounded-[14px] border border-[#E2E8F0] bg-white p-4 shadow-xs md:p-6'}`}
           >
+            {isManagementDashboard && (
+              <h2 className="text-xl font-bold text-[#0F172A]">
+                {isDirector ? 'Ongoing tasks of all employees and Project Head' : 'Ongoing tasks of employees under me'}
+              </h2>
+            )}
             {!isManagementDashboard && (
               <div className="border-b border-[#E2E8F0] pb-3">
                 <h3 className="text-lg font-bold text-[#0F172A]">Dash Board — tasks and flags</h3>
@@ -3384,14 +3711,16 @@ const Dashboard: React.FC = () => {
             )}
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <div ref={priorityMenuRef} className="relative">
+              <div ref={priorityMenuRef} className={`relative ${isProjectHead ? 'lg:order-2' : ''}`}>
                 <button
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={isPriorityMenuOpen}
                   onClick={() => setIsPriorityMenuOpen(open => !open)}
                   className={`flex min-h-10 w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-extrabold text-slate-950 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB] ${
-                    isManagementDashboard
+                    isProjectHead
+                      ? 'border border-[#CBD5E1] bg-white text-[#334155] hover:bg-slate-50'
+                      : isManagementDashboard
                       ? 'bg-[#DC2626] hover:bg-[#B91C1C]'
                       : taskPriorityFilter !== 'all'
                         ? 'border border-[#2563EB] bg-blue-50 text-[#1D4ED8]'
@@ -3470,13 +3799,15 @@ const Dashboard: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className="relative">
+              <div className={`relative ${isProjectHead ? 'lg:order-4' : ''}`}>
                 <select
                   aria-label="Filter tasks by project"
                   value={taskProjectFilter}
                   onChange={(e) => setTaskProjectFilter(e.target.value)}
                   className={`min-h-10 w-full appearance-none rounded-lg px-3 py-2 pr-9 text-xs font-extrabold text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB] ${
-                    isManagementDashboard ? 'bg-[#F59E0B] hover:bg-[#D97706]' : 'border border-[#CBD5E1] bg-white text-[#334155]'
+                    isProjectHead
+                      ? 'border border-[#CBD5E1] bg-white text-[#334155]'
+                      : isManagementDashboard ? 'bg-[#F59E0B] hover:bg-[#D97706]' : 'border border-[#CBD5E1] bg-white text-[#334155]'
                   }`}
                 >
                   <option value="all">Project: All</option>
@@ -3489,13 +3820,15 @@ const Dashboard: React.FC = () => {
                 <ChevronDown aria-hidden="true" size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-950" />
               </div>
 
-              <div className="relative">
+              <div className={`relative ${isProjectHead ? 'lg:order-3' : ''}`}>
                 <select
                   aria-label="Filter tasks by employee"
                   value={taskEmployeeFilter}
                   onChange={(e) => setTaskEmployeeFilter(e.target.value)}
                   className={`min-h-10 w-full appearance-none rounded-lg px-3 py-2 pr-9 text-xs font-extrabold text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB] ${
-                    isManagementDashboard ? 'bg-[#3B82F6] hover:bg-[#2563EB]' : 'border border-[#CBD5E1] bg-white text-[#334155]'
+                    isProjectHead
+                      ? 'border border-[#CBD5E1] bg-white text-[#334155]'
+                      : isManagementDashboard ? 'bg-[#3B82F6] hover:bg-[#2563EB]' : 'border border-[#CBD5E1] bg-white text-[#334155]'
                   }`}
                 >
                   <option value="all">Employee: All</option>
@@ -3511,7 +3844,7 @@ const Dashboard: React.FC = () => {
                 <ChevronDown aria-hidden="true" size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-950" />
               </div>
 
-              <div className={`grid gap-2 ${taskTimeFilter === 'all' ? 'grid-cols-1' : 'grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]'}`}>
+              <div className={`grid gap-2 ${taskTimeFilter === 'all' ? 'grid-cols-1' : 'grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]'} ${isProjectHead ? 'lg:order-1' : ''}`}>
                 <div className="relative min-w-0">
                   <select
                     aria-label="Filter tasks by time period"
@@ -3522,7 +3855,9 @@ const Dashboard: React.FC = () => {
                       if (mode !== 'all' && !taskTimeDate) setTaskTimeDate(todayDateStr);
                     }}
                     className={`min-h-10 min-w-0 w-full appearance-none rounded-lg px-3 py-2 pr-9 text-xs font-extrabold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB] ${
-                      isManagementDashboard ? 'bg-[#6366F1] text-slate-950' : 'border border-[#CBD5E1] bg-white font-semibold text-[#334155]'
+                      isProjectHead
+                        ? 'border border-[#CBD5E1] bg-white font-semibold text-[#334155]'
+                        : isManagementDashboard ? 'bg-[#6366F1] text-slate-950' : 'border border-[#CBD5E1] bg-white font-semibold text-[#334155]'
                     }`}
                   >
                     <option value="all">Time: All</option>
@@ -3544,7 +3879,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {(!isManagementDashboard || activeTab === 'tasks') && (
+            {!isManagementDashboard && (
             <div className="flex flex-col gap-2 border-b border-[#E2E8F0] pb-4 sm:flex-row sm:flex-wrap sm:items-center">
               <input
                 type="text"
@@ -3569,16 +3904,31 @@ const Dashboard: React.FC = () => {
             </div>
             )}
 
-            <div className={`overflow-x-auto ${isManagementDashboard ? 'pt-8' : ''}`}>
-              <table className={`w-full border-collapse text-left text-xs ${isManagementDashboard ? (isDirector ? 'min-w-[900px] table-fixed' : 'min-w-[1120px] table-fixed') : ''}`}>
+            <div className={`overflow-x-auto ${isManagementDashboard ? (isProjectHead ? 'pt-4' : 'pt-8') : ''}`}>
+              <table className={`w-full border-collapse text-left text-xs ${isManagementDashboard ? (isProjectHead ? 'min-w-[760px] table-fixed' : 'min-w-[1120px] table-fixed') : ''}`}>
                 {isManagementDashboard && (
                   <colgroup>
-                    {isDirector ? (
+                    {isProjectHead && !isManagementPersonalView ? (
+                      <>
+                        <col className="w-[4%]" />
+                        <col className="w-[4.5%]" />
+                        <col className="w-[38%]" />
+                        <col className="w-[53.5%]" />
+                      </>
+                    ) : !isManagementPersonalView ? (
+                      <>
+                        <col className="w-[4%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[27%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[39%]" />
+                      </>
+                    ) : isDirector ? (
                       <>
                         <col className="w-[5%]" />
                         <col className="w-[35%]" />
-                        <col className="w-[25%]" />
-                        <col className="w-[20%]" />
+                        <col className={isManagementPersonalView ? 'w-[20%]' : 'w-[25%]'} />
+                        <col className={isManagementPersonalView ? 'w-[25%]' : 'w-[20%]'} />
                         <col className="w-[15%]" />
                       </>
                     ) : (
@@ -3598,7 +3948,7 @@ const Dashboard: React.FC = () => {
                 <thead>
                   <tr className={`border-b font-bold text-[11px] ${isManagementDashboard ? 'border-[#CBD5E1] bg-[#334155] text-white' : 'border-[#E2E8F0] bg-[#F8FAFC] uppercase text-[#64748B]'}`}>
                     <th className="p-3.5 w-10">
-                      <input
+                      {!isProjectHead && <input
                         type="checkbox"
                         checked={allVisibleSelected}
                         onChange={(e) => {
@@ -3610,31 +3960,33 @@ const Dashboard: React.FC = () => {
                         }}
                         className="accent-[#2563EB] cursor-pointer"
                         aria-label="Select all visible tasks"
-                      />
+                      />}
                     </th>
-                    <th className="p-3.5">{isManagementDashboard ? 'Task' : 'Task Title'}</th>
-                    <th className="p-3.5">Project</th>
-                    <th className="p-3.5">{isManagementDashboard ? 'In-charge' : 'Assigned Staff'}</th>
-                    {isManagementDashboard ? (
-                      isDirector ? (
-                        <th className="p-3.5">Reviewed By</th>
-                      ) : (
+                    {isProjectHead && !isManagementPersonalView ? (
                       <>
-                        <th className="p-3.5">Priority</th>
-                        <th className="p-3.5">Submitted By</th>
-                        <th className="p-3.5">Reviewed By</th>
                         <th className="p-3.5">Flag</th>
+                        <th className="p-3.5">Task name and details</th>
+                        <th className="p-3.5">Latest 5 comments</th>
                       </>
-                      )
+                    ) : isManagementDashboard && !isManagementPersonalView ? (
+                      <>
+                        <th className="p-3.5">Flag</th>
+                        <th className="p-3.5">Project / Task / Subtasks</th>
+                        <th className="p-3.5">Description</th>
+                        <th className="p-3.5">Latest 5 comments</th>
+                      </>
                     ) : (
                       <>
-                        <th className="p-3.5">Priority</th>
-                        <th className="p-3.5">Flag</th>
-                        <th className="p-3.5">Due</th>
+                        <th className="p-3.5">{isManagementDashboard ? 'Task / Subtask' : 'Task Title'}</th>
+                        <th className="p-3.5">Project</th>
+                        <th className="p-3.5">{isManagementPersonalView ? 'Description' : 'Assigned Staff'}</th>
                       </>
                     )}
                     {!isManagementDashboard && (
                       <>
+                        <th className="p-3.5">Priority</th>
+                        <th className="p-3.5">Flag</th>
+                        <th className="p-3.5">Due</th>
                         <th className="p-3.5">Individual Status</th>
                         <th className="p-3.5">Work %</th>
                         <th className="p-3.5">Status</th>
@@ -3642,13 +3994,32 @@ const Dashboard: React.FC = () => {
                         <th className="p-3.5 text-right">Actions</th>
                       </>
                     )}
+                    {isManagementDashboard && isManagementPersonalView && (
+                      isManagementPersonalView ? (
+                        <th className="p-3.5">Priority / Status</th>
+                      ) : null
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2E8F0]">
-                  {groupedFilteredTasks.map(group => (
+                  {groupedFilteredTasks.map(group => {
+                    const visibleGroupTasks = isProjectHead
+                      ? group.items.filter(task =>
+                          !task.parentTaskId || !group.items.some(candidate => taskKey(candidate) === String(task.parentTaskId))
+                        )
+                      : group.items;
+                    return (
                     <React.Fragment key={group.projectId}>
-                      {group.items.map((t, index) => {
+                      {visibleGroupTasks.map((t, index) => {
                     const tId = t.id || t._id || '';
+                    const projectHeadSubtasks = isProjectHead
+                      ? group.items.filter(task => String(task.parentTaskId || '') === String(tId))
+                      : [];
+                    const projectHeadRelatedTasks = [t, ...projectHeadSubtasks];
+                    const projectHeadComments = projectHeadRelatedTasks
+                      .flatMap(task => task.comments || [])
+                      .sort((first, second) => new Date(first.timestamp || 0).getTime() - new Date(second.timestamp || 0).getTime())
+                      .slice(-5);
                     return (
                       <tr key={tId} className={`group transition hover:bg-[#F1F5F9] ${isManagementDashboard ? 'bg-white even:bg-[#F8FAFC]' : ''}`}>
                         <td className="p-3.5">
@@ -3667,29 +4038,62 @@ const Dashboard: React.FC = () => {
                             />
                           )}
                         </td>
+                        {isManagementDashboard && !isManagementPersonalView && (
+                          <td className="p-3.5 align-top">
+                            {(() => {
+                              const openFlag = flags.find(flag =>
+                                String(flag.taskId) === String(tId) && flag.status === 'Open'
+                              );
+                              const isFlagged = projectHeadRelatedTasks.some(task => task.flagStatus === 'Open' || flags.some(flag =>
+                                String(flag.taskId) === taskKey(task) && flag.status === 'Open'
+                              ));
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setManagementFlagTask(t);
+                                    setManagementFlagTaskIds([taskKey(t)]);
+                                    setManagementFlagType('Progress Concern');
+                                    setManagementFlagMessage(openFlag?.flagMessage || t.flagMessage || '');
+                                  }}
+                                  title={openFlag?.flagMessage || t.flagMessage || (isFlagged ? 'Open intervention flag' : 'Raise an intervention flag')}
+                                  className={`${isProjectHead ? 'px-1 py-1 text-red-600' : `inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold ${isFlagged ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600 hover:bg-orange-50 hover:text-orange-700'}`}`}
+                                >
+                                  <FlagIcon size={isProjectHead ? 14 : 13} fill={isFlagged ? 'currentColor' : 'none'} />
+                                  {!isProjectHead && (isFlagged ? 'Flagged' : 'Flag')}
+                                </button>
+                              );
+                            })()}
+                          </td>
+                        )}
                         <td className={`p-3.5 font-bold text-[#0F172A] ${t.parentTaskId ? 'pl-8' : ''}`}>
                           {isManagementDashboard ? (
-                            <div className="flex items-center justify-between gap-2">
+                            <div>
                               <button
                                 type="button"
-                                onClick={() => { setSelectedTask(t); setIsTaskModalOpen(true); }}
+                                onClick={() => { setSelectedTask(t); setPersonalTaskMode(false); setIsTaskModalOpen(true); }}
                                 className="text-left hover:text-[#2563EB] focus-visible:outline-none focus-visible:underline"
                                 aria-label={`Edit ${t.title}`}
                               >
+                                {isProjectHead && `${t.projectName || projectHeading(group)}/`}
                                 {t.parentTaskId && <span className="mr-1 text-slate-400">↳</span>}
                                 {t.title}
                               </button>
-                              {isDirector && (
-                                <button
-                                  type="button"
-                                  title={`Rate ${t.title} privately`}
-                                  aria-label={`Rate ${t.title} privately`}
-                                  onClick={() => openPrivateRating(t, t.assignedEmployeeIds?.[0] || '')}
-                                  disabled={!t.assignedEmployeeIds?.[0]}
-                                  className="flex-shrink-0 rounded p-1 text-[#D97706] opacity-0 transition-opacity hover:bg-amber-50 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 group-hover:opacity-100"
-                                >
-                                  <Star size={14} />
-                                </button>
+                              {isProjectHead && projectHeadSubtasks.map(subtask => (
+                                <p key={taskKey(subtask)} className="mt-0.5 break-words text-[11px] font-normal leading-tight text-[#475569]">
+                                  {t.projectName || projectHeading(group)}/{t.title}/{subtask.title}
+                                </p>
+                              ))}
+                              {isProjectHead && (
+                                <>
+                                  <p className="mt-0.5 whitespace-pre-wrap text-[11px] font-normal italic leading-tight text-[#64748B]">{t.description || '-'}</p>
+                                  <p className="mt-1 text-[11px] font-bold text-[#2563EB]">
+                                    {t.priority === 'Medium' ? 'Less Urgent' : t.priority || 'Daily Task'} | {t.assignedEmployeeNames?.join(', ') || 'Unassigned'} | {t.projectName || projectHeading(group)}
+                                  </p>
+                                </>
+                              )}
+                              {!isManagementPersonalView && !isProjectHead && (
+                                <p className="mt-1 text-[11px] font-medium text-[#64748B]">{t.projectName || projectHeading(group)}</p>
                               )}
                             </div>
                           ) : (
@@ -3699,12 +4103,15 @@ const Dashboard: React.FC = () => {
                             </>
                           )}
                         </td>
-                        {index === 0 && (
+                        {index === 0 && !isManagementDashboard && (
                           <td rowSpan={group.items.length} className="p-3.5 font-bold text-[#0F172A] align-top">
                             {projectHeading(group)}
                           </td>
                         )}
-                        <td className="p-3.5">
+                        {(!isProjectHead || isManagementPersonalView) && <td className="p-3.5">
+                          {isManagementDashboard ? (
+                            <p className="whitespace-pre-wrap font-normal text-[#475569]">{t.description || '-'}</p>
+                          ) : (
                           <div className="flex max-w-[180px] items-center gap-2">
                             {!isManagementDashboard && <EmployeeAvatar name={t.assignedEmployeeNames?.[0] || 'Staff'} size="sm" />}
                             <span
@@ -3715,75 +4122,51 @@ const Dashboard: React.FC = () => {
                               {(t.assignedEmployeeNames?.length || 0) > 1 ? ` +${(t.assignedEmployeeNames?.length || 1) - 1}` : ''}
                             </span>
                           </div>
-                        </td>
-                        {isManagementDashboard ? isDirector ? null : (
-                          <>
-                            <td className="p-3.5">
-                              <PriorityBadge priority={t.priority} />
-                            </td>
-                            <td className="p-3.5 text-[#334155]">
-                              {(() => {
-                                const submitters = (t.assigneeProgress || [])
-                                  .filter(progress => progress.lastSubmittedAt)
-                                  .map(progress => progress.employeeName || 'Employee');
-                                if (submitters.length === 0 && (t.workDone || 0) > 0 && (t.assignedEmployeeNames?.length || 0) === 1) {
-                                  submitters.push(t.assignedEmployeeNames?.[0] || 'Employee');
-                                }
-                                return submitters.length > 0
-                                  ? <span title={submitters.join(', ')}>{submitters.join(', ')}</span>
-                                  : <span className="text-[#94A3B8]">-</span>;
-                              })()}
-                            </td>
-                            <td className="p-3.5 text-[#334155]">
-                              {t.approvedBy
-                                ? (() => {
-                                    const reviewer = employees.find(
-                                      employee => String(employee.id || employee._id) === String(t.approvedBy)
-                                    );
-                                    if (reviewer) return `${reviewer.firstName} ${reviewer.lastName}`.trim();
-                                    if (String(t.approvedBy) === String(user?.id || user?._id)) {
-                                      return user?.name || (isDirector ? 'Director' : 'Project Head');
-                                    }
-                                    return '-';
-                                  })()
-                                : t.status === 'Pending Approval'
-                                  ? <span className="font-semibold text-amber-700">Pending review</span>
-                                  : <span className="text-[#94A3B8]">-</span>}
-                            </td>
-                            <td className="p-3.5">
-                              {(() => {
-                                const openFlag = flags.find(flag =>
-                                  String(flag.taskId) === String(tId) && flag.status === 'Open'
-                                );
-                                const isFlagged = t.flagStatus === 'Open' || Boolean(openFlag);
-                                return (
-                                  <div className="flex flex-col items-start gap-1.5">
-                                    {isFlagged && (
-                                      <span
-                                        title={openFlag?.flagMessage || t.flagMessage || 'This task has an open flag'}
-                                        className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700"
-                                      >
-                                        Flagged
-                                      </span>
+                          )}
+                        </td>}
+                        {isManagementDashboard && !isManagementPersonalView ? (
+                          <td className="p-3.5">
+                            {(isProjectHead ? projectHeadComments : (t.comments || [])).length > 0 ? (
+                              <ol className="max-h-40 space-y-1.5 overflow-y-auto">
+                                {(isProjectHead ? projectHeadComments : (t.comments || []).slice(-5).reverse()).map((comment, commentIndex) => (
+                                  <li key={`${comment.id || commentIndex}-${comment.timestamp}`} className={`break-words text-[11px] leading-relaxed ${isProjectHead && commentIndex === projectHeadComments.length - 1 ? 'font-semibold text-[#C55A11]' : 'text-[#475569]'}`}>
+                                    {isProjectHead ? (
+                                      <>
+                                        {comment.content}
+                                        {comment.timestamp ? ` (${new Date(comment.timestamp).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })})` : ''}
+                                        {comment.userName ? ` (${comment.userName})` : ''}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="font-semibold text-[#334155]">
+                                          {comment.userName || comment.role}
+                                          {comment.timestamp ? ` · ${new Date(comment.timestamp).toLocaleString()}` : ''}:
+                                        </span>{' '}
+                                        {comment.content}
+                                      </>
                                     )}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setManagementFlagTask(t);
-                                        setManagementFlagTaskIds([taskKey(t)]);
-                                        setManagementFlagType('Progress Concern');
-                                        setManagementFlagMessage(openFlag?.flagMessage || t.flagMessage || '');
-                                      }}
-                                      className="inline-flex items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-2.5 py-1 text-[11px] font-bold text-orange-800 transition hover:bg-orange-100"
-                                    >
-                                      <FlagIcon size={12} />
-                                      {isFlagged ? 'Update Flag' : 'Flag Task'}
-                                    </button>
-                                  </div>
-                                );
-                              })()}
-                            </td>
-                          </>
+                                  </li>
+                                ))}
+                              </ol>
+                            ) : (
+                              <span className="text-[11px] text-[#94A3B8]">No comments yet.</span>
+                            )}
+                          </td>
+                        ) : isManagementDashboard && isManagementPersonalView ? (
+                          <td className="p-3.5">
+                            <div className="flex flex-col items-start gap-2">
+                              <PriorityBadge priority={t.priority} />
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                t.status === 'Completed'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : t.status === 'Pending Approval'
+                                    ? 'bg-amber-50 text-amber-700'
+                                    : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {t.status}
+                              </span>
+                            </div>
+                          </td>
                         ) : (
                           <td className="p-3.5">
                             <PriorityBadge priority={t.priority} />
@@ -3809,30 +4192,6 @@ const Dashboard: React.FC = () => {
                               {t.dueDate || '-'}
                             </td>
                           </>
-                        )}
-                        {isDirector && (
-                          <td className="p-3.5">
-                            {t.approvedBy
-                              ? (() => {
-                                  const reviewer = employees.find(
-                                    employee => String(employee.id || employee._id) === String(t.approvedBy)
-                                  );
-                                  const reviewerName = reviewer
-                                    ? `${reviewer.firstName} ${reviewer.lastName}`.trim()
-                                    : String(t.approvedBy) === String(user?.id || user?._id)
-                                      ? user?.name || 'Director'
-                                      : 'Reviewer';
-                                  return (
-                                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
-                                      <UserCheck size={13} className="shrink-0" />
-                                      <span className="truncate" title={reviewerName}>{reviewerName}</span>
-                                    </span>
-                                  );
-                                })()
-                              : t.status === 'Pending Approval'
-                                ? <span className="font-semibold text-amber-700">Pending review</span>
-                                : <span className="text-[#94A3B8]">-</span>}
-                          </td>
                         )}
                         {!isManagementDashboard && (
                         <>
@@ -3929,11 +4288,12 @@ const Dashboard: React.FC = () => {
                     );
                   })}
                     </React.Fragment>
-                  ))}
+                    );
+                  })}
                   {groupedFilteredTasks.length === 0 && (
                     <tr>
                       <td
-                        colSpan={isManagementDashboard ? (isDirector ? 5 : 8) : 12}
+                        colSpan={isManagementDashboard ? (isManagementPersonalView ? 5 : 5) : 12}
                         className="px-4 py-10 text-center text-sm text-[#64748B]"
                       >
                         {loading ? 'Loading tasks…' : 'No tasks match these filters.'}
@@ -3945,23 +4305,40 @@ const Dashboard: React.FC = () => {
             </div>
 
             <div className={`grid gap-3 ${isManagementDashboard ? 'mt-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 border-t border-[#E2E8F0] pt-4 sm:grid-cols-2 xl:grid-cols-4'}`}>
-              <button
-                type="button"
-                onClick={() => addTasksToDailyBoard(selectedTaskIds)}
-                disabled={selectedTaskIds.length === 0}
-                className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#2563EB] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {!isManagementDashboard && <ShoppingCart size={15} />}
-                Add to Daily Task Board{!isManagementDashboard && selectedTaskIds.length > 0 ? ` (${selectedTaskIds.length})` : ''}
-              </button>
+              {!isManagementDashboard && (
+                <button
+                  type="button"
+                  onClick={() => addTasksToDailyBoard(selectedTaskIds)}
+                  disabled={selectedTaskIds.length === 0}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#2563EB] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ShoppingCart size={15} />
+                  Add to Daily Task Board ({selectedTaskIds.length})
+                </button>
+              )}
+              {isManagementDashboard && (
+                <button
+                  type="button"
+                  disabled={selectedTaskIds.length !== 1}
+                  onClick={() => {
+                    const task = tasks.find(item => taskKey(item) === selectedTaskIds[0]);
+                    if (!task) return;
+                    setSelectedTask(task);
+                    setIsTaskModalOpen(true);
+                  }}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#2563EB] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Edit Task &gt;
+                </button>
+              )}
               {(isDirector || isProjectHead) && (
                 <button
                   type="button"
-                  onClick={openCreateTask}
+                  onClick={() => openCreateTask(isDirector && activeTab === 'overview')}
                   className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#16A34A] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#15803D]"
                 >
-                  {!isManagementDashboard && <Plus size={15} />}
-                  {isManagementDashboard ? '+ Add New Task' : 'Add New Task'}
+                  <Plus size={15} />
+                  {isManagementDashboard ? 'New Task +' : 'Add New Task'}
                 </button>
               )}
               {isDirector && (
@@ -3971,7 +4348,7 @@ const Dashboard: React.FC = () => {
                   disabled={selectedTaskIds.length === 0}
                   className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#DC2626] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#B91C1C] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Remove Task
+                  Delete Task
                 </button>
               )}
               {(isDirector || isProjectHead) && (
@@ -3982,7 +4359,7 @@ const Dashboard: React.FC = () => {
                   className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#475569] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#334155] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {!isManagementDashboard && <CheckCircle2 size={15} />}
-                  Mark Completed → History
+                  Completed Task
                 </button>
               )}
               {!isManagementDashboard && (
@@ -3991,11 +4368,6 @@ const Dashboard: React.FC = () => {
                 </span>
               )}
             </div>
-            {isProjectHead && (
-              <div className="rounded-lg border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-xs text-[#1E3A8A]">
-                Add New Task: title, project, in-charge employee, priority and auto reminders (Director / Project Head only). Remove Task is not available to Project Head.
-              </div>
-            )}
           </div>
         )}
 
@@ -4195,11 +4567,21 @@ const Dashboard: React.FC = () => {
         <TaskModal
           isOpen={isTaskModalOpen}
           task={selectedTask}
+          personalTask={personalTaskMode}
+          projectHeadWorkflow={isProjectHead && activeTab === 'tasks'}
           projects={projects}
           employees={employees}
           existingTasks={tasks}
           onClose={() => setIsTaskModalOpen(false)}
           onSave={handleSaveTask}
+          onDelete={isDirector ? task => {
+            const id = taskKey(task);
+            if (id && window.confirm(`Permanently delete "${task.title}"?`)) {
+              setIsTaskModalOpen(false);
+              void handleDeleteTask(id);
+            }
+          } : undefined}
+          onComplete={handleCompleteTask}
           dataLoading={loading}
         />
 
@@ -4214,6 +4596,7 @@ const Dashboard: React.FC = () => {
         />
 
       </div>
+    </div>
     </div>
   );
 };

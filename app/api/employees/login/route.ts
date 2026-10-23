@@ -2,22 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '../../../../lib/mongodb'
 import Employee from '../../../../models/Employee'
 import { comparePassword, ensureDirectorAccountsActive, signToken } from '../../../../lib/auth'
-import { seedDatabase } from '../../../../lib/seed'
 import { canAccountLogin, isDirectorRole, isInactiveEmployee, normalizeEmployeeStatus } from '../../../../lib/employeeStatus'
 
 export async function POST(request: NextRequest) {
   try {
     await dbConnect()
-
-    // Auto seed database if no employees exist yet
-    try {
-      const count = await Employee.countDocuments()
-      if (count === 0) {
-        await seedDatabase()
-      }
-    } catch (seedErr) {
-      console.warn('Auto-seed check skipped or failed:', seedErr)
-    }
 
     try {
       await ensureDirectorAccountsActive()

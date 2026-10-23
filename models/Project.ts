@@ -6,6 +6,7 @@ export interface IProject extends Document {
   projectNumber: string
   location?: string
   description: string
+  startDate?: string
   contactDetails?: string
   projectRemarks: Array<{
     date: string
@@ -23,6 +24,7 @@ const projectSchema = new Schema<IProject>({
   projectNumber: { type: String, required: true },
   location: { type: String, required: false },
   description: { type: String, required: true },
+  startDate: { type: String, default: '' },
   contactDetails: { type: String, required: false },
   projectRemarks: [{
     date: { type: String, required: true },

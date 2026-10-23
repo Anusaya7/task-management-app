@@ -166,6 +166,8 @@ export async function GET(req: Request) {
       const weeklyHistoryMap = new Map<string, {
         tasksDone: number
         hoursLogged: number
+        hoursByDate: Record<string, number>
+        taskTitles: string[]
         ratings: number[]
       }>()
       const getWeeklyHistoryItem = (dateStr: string) => {
@@ -173,7 +175,7 @@ export async function GET(req: Request) {
         if (!periodStart) return null
         let item = weeklyHistoryMap.get(periodStart)
         if (!item) {
-          item = { tasksDone: 0, hoursLogged: 0, ratings: [] }
+          item = { tasksDone: 0, hoursLogged: 0, hoursByDate: {}, taskTitles: [], ratings: [] }
           weeklyHistoryMap.set(periodStart, item)
         }
         return item
@@ -181,7 +183,11 @@ export async function GET(req: Request) {
 
       for (const entry of dailyEntries) {
         const item = getWeeklyHistoryItem(entry.date)
-        if (item) item.hoursLogged += Number(entry.hours) || 0
+        if (item) {
+          const hours = Number(entry.hours) || 0
+          item.hoursLogged += hours
+          item.hoursByDate[entry.date] = (item.hoursByDate[entry.date] || 0) + hours
+        }
       }
 
       for (const task of tasks) {
@@ -192,6 +198,7 @@ export async function GET(req: Request) {
         const item = getWeeklyHistoryItem(completionDate)
         if (!item) continue
         item.tasksDone += 1
+        if (task.title && !item.taskTitles.includes(task.title)) item.taskTitles.push(task.title)
         const rating = getExactTaskRating(task._id.toString())
         if (rating !== null) item.ratings.push(rating)
       }
@@ -201,11 +208,23 @@ export async function GET(req: Request) {
         .map(([periodStart, item]) => {
           const periodEndDate = new Date(`${periodStart}T00:00:00.000Z`)
           periodEndDate.setUTCDate(periodEndDate.getUTCDate() + 6)
+          const effectiveWeekEnd = periodEndDate.toISOString().slice(0, 10) < today
+            ? periodEndDate.toISOString().slice(0, 10)
+            : today
+          let freeHours = 0
+          for (let date = new Date(`${periodStart}T00:00:00.000Z`); date.toISOString().slice(0, 10) <= effectiveWeekEnd; date.setUTCDate(date.getUTCDate() + 1)) {
+            const day = date.getUTCDay()
+            if (day === 0 || day === 6) continue
+            const dateKey = date.toISOString().slice(0, 10)
+            freeHours += Math.max(0, 8 - (item.hoursByDate[dateKey] || 0))
+          }
           return {
             periodStart,
             periodEnd: periodEndDate.toISOString().slice(0, 10),
             tasksDone: item.tasksDone,
             hoursLogged: Math.round(item.hoursLogged * 100) / 100,
+            freeHours: Math.round(freeHours * 100) / 100,
+            taskTitles: item.taskTitles,
             rating: item.ratings.length > 0
               ? Math.round((item.ratings.reduce((sum, rating) => sum + rating, 0) / item.ratings.length) * 10) / 10
               : null
@@ -243,9 +262,7 @@ export async function GET(req: Request) {
         for (const dStr of workDates) {
           const dayHours = Math.round((hoursByDate[dStr] || 0) * 60) / 60
           const dayEntries = entriesByDate[dStr] || []
-          const freeHours = Math.round(Math.max(0, 8 - dayHours) * 60) / 60
           totalWorkHours += dayHours
-          totalFreeHours += freeHours
 
           const taskMarkings: Array<{ title: string; marking: number | null }> = []
           const seenTitles = new Set<string>()
@@ -281,9 +298,20 @@ export async function GET(req: Request) {
             tasks: taskMarkings.map(item => item.title),
             taskMarkings,
             workHours: dayHours,
-            freeHours,
+            freeHours: Math.round(Math.max(0, 8 - dayHours) * 60) / 60,
             marking
           })
+        }
+
+        const workingDate = new Date(`${startDateStr}T00:00:00.000Z`)
+        const rangeEndDate = new Date(`${effectiveEnd}T00:00:00.000Z`)
+        while (workingDate <= rangeEndDate) {
+          const weekday = workingDate.getUTCDay()
+          if (weekday !== 0 && weekday !== 6) {
+            const dateKey = workingDate.toISOString().slice(0, 10)
+            totalFreeHours += Math.max(0, 8 - (hoursByDate[dateKey] || 0))
+          }
+          workingDate.setUTCDate(workingDate.getUTCDate() + 1)
         }
 
         const rangeEntries = dailyEntries.filter(e => e.date >= startDateStr && e.date <= effectiveEnd)
@@ -324,7 +352,7 @@ export async function GET(req: Request) {
       }
       if (reqProjectId) {
         weeklyMarkQuery.projectId = reqProjectId
-      } else if (user.role !== 'Employee') {
+      } else {
         weeklyMarkQuery.projectId = 'all'
       }
       const weeklyMarks = await PerformanceMark.find(weeklyMarkQuery).lean()
@@ -365,6 +393,10 @@ export async function GET(req: Request) {
         weeklyMark: weeklyMarks[0] ? {
           rating: weeklyMarks[0].rating,
           comment: weeklyMarks[0].comment,
+          selfRating: weeklyMarks[0].selfRating,
+          selfComment: weeklyMarks[0].selfComment,
+          coordinatorRating: weeklyMarks[0].coordinatorRating,
+          coordinatorComment: weeklyMarks[0].coordinatorComment,
           periodStart: weeklyMarks[0].periodStart,
           periodEnd: weeklyMarks[0].periodEnd,
           projectId: weeklyMarks[0].projectId
@@ -372,6 +404,10 @@ export async function GET(req: Request) {
         weeklyMarks: weeklyMarks.map(mark => ({
           rating: mark.rating,
           comment: mark.comment,
+          selfRating: mark.selfRating,
+          selfComment: mark.selfComment,
+          coordinatorRating: mark.coordinatorRating,
+          coordinatorComment: mark.coordinatorComment,
           periodStart: mark.periodStart,
           periodEnd: mark.periodEnd,
           projectId: mark.projectId

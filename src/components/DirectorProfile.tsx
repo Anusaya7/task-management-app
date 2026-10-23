@@ -589,4 +589,3 @@ const DirectorProfile: React.FC = () => {
 };
 
 export default DirectorProfile;
-

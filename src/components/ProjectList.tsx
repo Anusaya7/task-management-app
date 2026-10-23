@@ -106,8 +106,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
     setSelectedProject(null);
   };
 
-  const canCreateProject = user?.role === 'Director' || user?.role === 'Project Head';
-  const canEditProject = user?.role === 'Director' || user?.role === 'Project Head';
+  const canCreateProject = user?.role === 'Director';
+  const canEditProject = user?.role === 'Director';
   const canDeleteProject = user?.role === 'Director';
   const isDirector = user?.role === 'Director';
 
@@ -136,145 +136,140 @@ const ProjectList: React.FC<ProjectListProps> = ({
   };
 
   if (isDirector) {
-    const projectCounts = PROJECT_BOARD_STATUSES.map(status => ({
-      ...status,
-      count: projects.filter(project => normalizeProjectStatus(project.status) === status.value).length
-    }));
-
     return (
       <>
         <section className="space-y-4" aria-labelledby="director-project-board-title">
           <div>
-            <h2 id="director-project-board-title" className="text-xl font-bold text-[#0F172A]">
+            <h2 id="director-project-board-title" className="text-xl sm:text-2xl font-bold text-[#0F172A] tracking-tight">
               Project Board
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {projectCounts.map((status) => {
-              const selected = statusFilter === status.value;
-              const colorClasses = status.value === 'Ongoing'
-                ? 'bg-[#159947] hover:bg-[#12833d]'
-                : status.value === 'Upcoming'
-                  ? 'bg-[#3478E5] hover:bg-[#2868ce]'
-                  : status.value === 'Sleeping (On Hold)'
-                    ? 'bg-[#F29A05] hover:bg-[#db8900]'
-                    : 'bg-[#64748B] hover:bg-[#526176]';
-
-              return (
-                <button
-                  key={status.value}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => onStatusFilterChange?.(selected ? 'all' : status.value)}
-                  className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${colorClasses} ${selected ? 'ring-2 ring-slate-900 ring-offset-2' : ''}`}
-                >
-                  <span>{status.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="overflow-x-auto rounded-sm border border-[#E2E8F0] bg-white">
-            <table className="w-full min-w-[680px] border-collapse text-left text-sm">
-              <thead className="bg-[#334155] text-white">
-                <tr>
-                  <th scope="col" className="border-r border-slate-500 px-3 py-2 font-bold">Project</th>
-                  <th scope="col" className="border-r border-slate-500 px-3 py-2 font-bold">Location</th>
-                  <th scope="col" className="border-r border-slate-500 px-3 py-2 font-bold">Status</th>
-                  <th scope="col" className="px-3 py-2 font-bold">Latest remark</th>
+          <div className="overflow-x-auto border border-[#CBD5E1] bg-white shadow-xs">
+            <table className="w-full min-w-[720px] table-fixed border-collapse text-left text-xs text-[#172033]">
+              <colgroup>
+                <col className="w-[6%]" />
+                <col className="w-[24%]" />
+                <col className="w-[20%]" />
+                <col className="w-[18%]" />
+                <col className="w-[32%]" />
+              </colgroup>
+              <thead>
+                <tr className="bg-[#2D3A4B] text-white">
+                  <th scope="col" className="border-r border-[#3D4C5E] px-3 py-2.5 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Select project"
+                      checked={visibleBoardProjects.length > 0 && selectedProjectId === String(visibleBoardProjects[0].id || visibleBoardProjects[0]._id)}
+                      onChange={e => {
+                        if (e.target.checked && visibleBoardProjects.length > 0) {
+                          setSelectedProjectId(String(visibleBoardProjects[0].id || visibleBoardProjects[0]._id));
+                        } else {
+                          setSelectedProjectId('');
+                        }
+                      }}
+                      className="h-3.5 w-3.5 rounded border border-slate-400 accent-[#2563EB] cursor-pointer"
+                    />
+                  </th>
+                  <th scope="col" className="border-r border-[#3D4C5E] px-3 py-2.5 font-bold">
+                    Project
+                  </th>
+                  <th scope="col" className="border-r border-[#3D4C5E] px-3 py-2.5 font-bold">
+                    Location
+                  </th>
+                  <th scope="col" className="border-r border-[#3D4C5E] px-3 py-2.5 font-bold">
+                    <div className="relative inline-flex items-center gap-1">
+                      <select
+                        aria-label="Filter by project status"
+                        value={statusFilter || 'all'}
+                        onChange={e => onStatusFilterChange?.(e.target.value)}
+                        className="cursor-pointer appearance-none bg-transparent pr-4 font-bold text-white outline-none focus:ring-0"
+                      >
+                        <option value="all" className="bg-[#2D3A4B] text-white">Status (All)</option>
+                        <option value="Ongoing" className="bg-[#2D3A4B] text-white">Status: Ongoing</option>
+                        <option value="Upcoming" className="bg-[#2D3A4B] text-white">Status: Upcoming</option>
+                        <option value="Sleeping (On Hold)" className="bg-[#2D3A4B] text-white">Status: On Hold</option>
+                        <option value="Completed" className="bg-[#2D3A4B] text-white">Status: Completed</option>
+                      </select>
+                      <span className="pointer-events-none absolute right-0 text-[10px]">▼</span>
+                    </div>
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-bold">
+                    Latest remark
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {visibleBoardProjects.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="h-40 px-4 text-center text-sm text-slate-400">
+                    <td colSpan={5} className="h-32 px-4 text-center text-sm text-slate-400">
                       {projects.length === 0 ? 'No projects found.' : 'No projects match this status.'}
                     </td>
                   </tr>
-                ) : visibleBoardProjects.map(project => {
-                  const id = String(project.id || project._id || '');
-                  const selected = selectedProjectId === id;
-                  const normalizedStatus = normalizeProjectStatus(project.status);
+                ) : (
+                  visibleBoardProjects.map((project, index) => {
+                    const id = String(project.id || project._id || '');
+                    const isChecked = selectedProjectId === id;
+                    const normalizedStatus = normalizeProjectStatus(project.status);
 
-                  return (
-                    <tr
-                      key={id || project.projectNumber}
-                      aria-selected={selected}
-                      onClick={() => {
-                        setSelectedProjectId(id);
-                      }}
-                      className={`cursor-pointer border-t border-[#E2E8F0] transition-colors odd:bg-[#F8FAFC] hover:bg-blue-50 ${selected ? 'bg-blue-100 ring-1 ring-inset ring-blue-400' : ''}`}
-                    >
-                      <td className="border-r border-[#E2E8F0] px-3 py-2.5 font-medium text-[#1E293B]">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleEditProject(project);
-                          }}
-                          className="text-left hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:underline"
-                          title="Edit project"
-                        >
+                    return (
+                      <tr
+                        key={id || project.projectNumber}
+                        onClick={() => setSelectedProjectId(isChecked ? '' : id)}
+                        className={`cursor-pointer border-t border-[#E2E8F0] transition-colors ${
+                          isChecked ? 'bg-blue-50/70' : index % 2 === 0 ? 'bg-white' : 'bg-[#F8FAFC]'
+                        } hover:bg-slate-50`}
+                      >
+                        <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => setSelectedProjectId(isChecked ? '' : id)}
+                            className="h-3.5 w-3.5 rounded border border-slate-400 accent-[#2563EB] cursor-pointer"
+                          />
+                        </td>
+                        <td className="border-r border-[#E2E8F0] px-3 py-2.5 font-medium text-[#1E293B]">
                           {project.projectName || project.projectNumber}
-                        </button>
-                      </td>
-                      <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">{project.location || '-'}</td>
-                      <td className="border-r border-[#E2E8F0] px-2 py-1.5 text-[#1E293B]">
-                        <select
-                          aria-label={`Change status for ${project.projectName || project.projectNumber}`}
-                          value={normalizedStatus}
-                          disabled={savingStatusProjectId !== null}
-                          onClick={event => event.stopPropagation()}
-                          onChange={event => void handleBoardStatusChange(project, event.target.value as ProjectStatus)}
-                          className="min-h-9 w-full cursor-pointer rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-[#1E293B] outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-200 disabled:cursor-wait disabled:opacity-60"
-                          title="Click to change project status"
-                        >
-                          {PROJECT_BOARD_STATUSES.map(option => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                        {savingStatusProjectId === id && (
-                          <p role="status" className="px-2 text-xs text-blue-700">Saving...</p>
-                        )}
-                        {statusSaveError.startsWith(`${project.projectName || project.projectNumber}:`) && (
-                          <p role="alert" className="px-2 text-xs text-red-700">{statusSaveError}</p>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 text-[#1E293B]">{formatLatestRemark(project)}</td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">
+                          {project.location || '-'}
+                        </td>
+                        <td className="border-r border-[#E2E8F0] px-3 py-2.5 text-[#1E293B]">
+                          {normalizedStatus}
+                        </td>
+                        <td className="px-3 py-2.5 text-[#1E293B]">
+                          {formatLatestRemark(project)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
-          <p role="status" className="sr-only">
-            {statusSaveError ? `Status update failed. ${statusSaveError}` : ''}
-          </p>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+          {/* Action Buttons: Add New Project (Green) & Edit Project (Red) */}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
               type="button"
               onClick={handleCreateProject}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#159947] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#12833d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2"
+              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-[#16A34A] px-6 py-2.5 text-sm font-bold text-white transition hover:bg-[#15803D] shadow-xs cursor-pointer"
             >
-              <Plus size={16} />
-              Add New Project
+              + Add New Project
             </button>
             <button
               type="button"
-              disabled={!selectedBoardProject}
               onClick={() => {
-                if (!selectedBoardProject) return;
-                const projectName = selectedBoardProject.projectName || selectedBoardProject.projectNumber;
-                if (window.confirm(`Remove "${projectName}"? Its tasks and related records will also be deleted.`)) {
-                  handleDeleteProject(selectedProjectId);
+                const target = selectedBoardProject || visibleBoardProjects[0];
+                if (target) {
+                  handleEditProject(target);
+                } else {
+                  handleCreateProject();
                 }
               }}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#DC2626] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#bd2020] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
+              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-[#DC2626] px-6 py-2.5 text-sm font-bold text-white transition hover:bg-[#B91C1C] shadow-xs cursor-pointer"
             >
-              <Trash2 size={16} />
-              Remove Project
+              + Edit Project
             </button>
           </div>
 
@@ -585,7 +580,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                       marginTop: '8px',
                       margin: 0
                     }}>
-                      Only Directors and Project Heads can create new projects
+                      Only Directors can create new projects
                     </p>
                   )}
                 </td>

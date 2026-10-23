@@ -30,14 +30,37 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isInitialDirectorSetup, setIsInitialDirectorSetup] = useState(false)
+  const [demoAccountsAvailable, setDemoAccountsAvailable] = useState(false)
+  const [setupChecked, setSetupChecked] = useState(false)
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const { login, logout } = useAuth()
   const router = useRouter()
 
-  const handleRoleSelect = (role: 'Employee' | 'Director' | 'Project Head') => {
+  const handleRoleSelect = async (role: 'Employee' | 'Director' | 'Project Head') => {
     setSelectedRole(role)
     setError('')
     setEmail('')
     setPassword('')
+    setConfirmPassword('')
+    setIsInitialDirectorSetup(false)
+    setDemoAccountsAvailable(false)
+    setSetupChecked(role !== 'Director')
+    if (role === 'Director') {
+      try {
+        const response = await fetch('/api/auth/setup')
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to check account setup.')
+        setIsInitialDirectorSetup(data.available === true)
+        setDemoAccountsAvailable(data.demoAccountsAvailable === true)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to check account setup.')
+      } finally {
+        setSetupChecked(true)
+      }
+    }
   }
 
   const handleBackToSelect = () => {
@@ -45,6 +68,32 @@ const Login: React.FC = () => {
     setError('')
     setEmail('')
     setPassword('')
+    setConfirmPassword('')
+    setIsInitialDirectorSetup(false)
+    setDemoAccountsAvailable(false)
+    setSetupChecked(false)
+  }
+
+  const handleCreateDemoAccounts = async () => {
+    setError('')
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'demo' })
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to create local demo accounts.')
+
+      const result = await login('director@company.com', 'password')
+      if (!result.success) throw new Error(result.error || 'Demo accounts created, but Director sign-in failed.')
+      router.push('/director')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create local demo accounts.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -71,6 +120,32 @@ const Login: React.FC = () => {
     setIsLoading(true)
 
     try {
+      if (isInitialDirectorSetup && selectedRole === 'Director') {
+        if (password !== confirmPassword) {
+          setError('Passwords do not match.')
+          return
+        }
+        const setupResponse = await fetch('/api/auth/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ firstName, lastName, email: cleanEmail, password })
+        })
+        const setupData = await setupResponse.json()
+        if (!setupResponse.ok) {
+          setError(setupData.error || 'Unable to create the Director account.')
+          return
+        }
+        const loginResult = await login(cleanEmail, password)
+        if (!loginResult.success || !loginResult.user) {
+          setError(loginResult.error || 'Account created. Please sign in with your new credentials.')
+          setIsInitialDirectorSetup(false)
+          setSetupChecked(true)
+          return
+        }
+        router.push('/director')
+        return
+      }
+
       const res = await login(cleanEmail, password)
       if (res.success && res.user) {
         // Role mismatch security check
@@ -167,7 +242,7 @@ const Login: React.FC = () => {
                   <span className="text-xs font-extrabold text-white">Performance</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  Weekly & monthly performance analytics with free-hour logic.
+                  Weekly task performance reviews and marks.
                 </p>
               </div>
 
@@ -241,7 +316,7 @@ const Login: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                      Manage assigned work, daily task board entries, reminders, and performance history.
+                      Manage daily tasks, completed task history, and performance.
                     </p>
                   </div>
                 </div>
@@ -265,7 +340,7 @@ const Login: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                      Manage organization teams, task assignments, project creation, private ratings, and executive reports.
+                      Manage task allotments, project and employee boards, completed work, and performance.
                     </p>
                   </div>
                 </div>
@@ -289,7 +364,7 @@ const Login: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                      Monitor assigned project execution, supervise employee tasks, process flags, and review work progress.
+                      Allot employee tasks, update the daily board, and review completed tasks and performance.
                     </p>
                   </div>
                 </div>
@@ -297,7 +372,7 @@ const Login: React.FC = () => {
 
               {/* Bottom Footer */}
               <div className="text-center text-xs font-semibold text-[#64748B] pt-4 border-t border-slate-200">
-                Task Management System &bull; Phase 1 Production Build
+                Task Management System
               </div>
             </div>
           )}
@@ -332,12 +407,55 @@ const Login: React.FC = () => {
                   {selectedRole} Sign In
                 </h2>
                 <p className="text-xs sm:text-sm text-[#64748B] font-medium">
-                  Sign in with your email address and password to access your {selectedRole.toLowerCase()} workspace.
+                  {isInitialDirectorSetup
+                    ? 'Create the first Director account to initialize this workspace.'
+                    : `Sign in with your email address and password to access your ${selectedRole.toLowerCase()} workspace.`}
                 </p>
               </div>
 
-              {/* Dedicated Form */}
+              {!setupChecked && selectedRole === 'Director' ? (
+                <p className="text-sm text-slate-500" role="status">Checking Director account setup...</p>
+              ) : (
               <form onSubmit={handleSubmit} className="space-y-5">
+                {isInitialDirectorSetup && demoAccountsAvailable && (
+                  <div className="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-900">
+                    <p className="font-bold">Local demo sign-in (development only)</p>
+                    <p>Director: director@company.com / password</p>
+                    <p>Project Head: projecthead@company.com / password</p>
+                    <p>Employee: employee@company.com / password</p>
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateDemoAccounts()}
+                      disabled={isLoading}
+                      className="w-full rounded-lg bg-indigo-700 px-4 py-2.5 font-bold text-white hover:bg-indigo-800 disabled:opacity-60"
+                    >
+                      {isLoading ? 'Creating local accounts...' : 'Create these local demo accounts'}
+                    </button>
+                  </div>
+                )}
+                {isInitialDirectorSetup && (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-[#0F172A]">First Name</label>
+                      <input
+                        value={firstName}
+                        onChange={event => setFirstName(event.target.value)}
+                        autoComplete="given-name"
+                        required
+                        className="w-full rounded-xl border border-slate-300 bg-[#F5F8FC] px-4 py-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-[#0F172A]">Last Name</label>
+                      <input
+                        value={lastName}
+                        onChange={event => setLastName(event.target.value)}
+                        autoComplete="family-name"
+                        className="w-full rounded-xl border border-slate-300 bg-[#F5F8FC] px-4 py-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                      />
+                    </div>
+                  </div>
+                )}
                 {/* Email Field */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-[#0F172A] uppercase tracking-wider">
@@ -377,6 +495,7 @@ const Login: React.FC = () => {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      autoComplete={isInitialDirectorSetup ? 'new-password' : 'current-password'}
                       placeholder="••••••••"
                       required
                       className="w-full pl-10 pr-11 py-3 bg-[#F5F8FC] border border-slate-300 rounded-xl text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:bg-white transition"
@@ -391,6 +510,21 @@ const Login: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                {isInitialDirectorSetup && (
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[#0F172A]">Confirm Password</label>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={event => setConfirmPassword(event.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      className="w-full rounded-xl border border-slate-300 bg-[#F5F8FC] px-4 py-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                    />
+                  </div>
+                )}
 
                 {/* Error Alert Box */}
                 {error && (
@@ -419,16 +553,17 @@ const Login: React.FC = () => {
                     </>
                   ) : (
                     <>
-                      <span>Sign In as {selectedRole}</span>
+                      <span>{isInitialDirectorSetup ? 'Create Director Account' : `Sign In as ${selectedRole}`}</span>
                       <ArrowRight size={18} />
                     </>
                   )}
                 </button>
               </form>
+              )}
 
               {/* Bottom Footer */}
               <div className="pt-4 text-center text-xs font-semibold text-[#64748B] border-t border-slate-200/80">
-                Task Management System &bull; Phase 1 Production Build
+                Task Management System
               </div>
             </div>
           )}

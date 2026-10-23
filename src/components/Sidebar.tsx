@@ -9,6 +9,7 @@ import {
   BarChart3,
   CheckCircle2,
   CalendarCheck,
+  ListTodo,
   Menu,
   X
 } from 'lucide-react';
@@ -34,6 +35,7 @@ interface SidebarProps {
   flagCount?: number;
   reminderCount?: number;
   cartCount?: number;
+  taskCount?: number;
 }
 
 type NavItem = { id: TabType; label: string; icon: any };
@@ -41,7 +43,8 @@ type NavItem = { id: TabType; label: string; icon: any };
 const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   onTabChange,
-  cartCount = 0
+  cartCount = 0,
+  taskCount = 0
 }) => {
   const { logout, user, isDirector, isProjectHead } = useAuth();
   const isManagementDashboard = isDirector || isProjectHead;
@@ -50,6 +53,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Director — requirement tabs (order fixed)
   const directorTabs: NavItem[] = [
     { id: 'overview', label: 'Dash Board', icon: LayoutDashboard },
+    { id: 'tasks', label: 'Task Allotment', icon: ListTodo },
     { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
     { id: 'projects', label: 'Project Board', icon: FolderOpen },
     { id: 'employees', label: 'Employee Board', icon: Users },
@@ -58,11 +62,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'profile', label: 'Profile', icon: User }
   ];
 
-  // Project Heads manage only the projects and employees assigned by a Director.
+  // Project Heads manage the work assigned by a Director, not the project or employee boards.
   const projectHeadTabs: NavItem[] = [
     { id: 'overview', label: 'Dash Board', icon: LayoutDashboard },
+    { id: 'tasks', label: 'Task Allotment', icon: ListTodo },
     { id: 'today-work', label: 'Daily Task Board', icon: CalendarCheck },
-    { id: 'projects', label: 'Project Board', icon: FolderOpen },
     { id: 'completed', label: 'Completed Task History', icon: CheckCircle2 },
     { id: 'performance', label: 'Performance', icon: BarChart3 },
     { id: 'profile', label: 'Profile', icon: User }
@@ -97,7 +101,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             key={tab.id}
             onClick={() => handleTabClick(tab.id)}
-            className={`w-full flex items-center justify-between rounded-xl font-semibold transition-all duration-150 ${isManagementDashboard ? 'px-3.5 py-3.5 text-sm' : 'px-3.5 py-2.5 text-xs'} ${isActive
+            className={`w-full flex items-center justify-between rounded-lg font-semibold transition-all duration-150 ${isProjectHead ? 'px-4 py-4 text-base' : isManagementDashboard ? 'px-3.5 py-3.5 text-sm' : 'px-4 py-4 text-base'} ${isActive
                 ? 'bg-[#2563EB] text-white shadow-md shadow-blue-900/30'
                 : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
               }`}
@@ -115,6 +119,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {cartCount}
               </span>
             )}
+            {isManagementDashboard && tab.id === 'tasks' && taskCount > 0 && (
+              <span className="flex h-[26px] min-w-[32px] items-center justify-center rounded-lg bg-[#DC2626] px-2 text-xs font-extrabold text-white">
+                {taskCount}
+              </span>
+            )}
           </button>
         );
       })}
@@ -126,15 +135,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Company Branding */}
       <div className={`p-4 ${isManagementDashboard ? 'pt-6' : 'border-b border-slate-800/80'}`}>
         <div className="flex items-center gap-3">
-          {!isManagementDashboard && (
-            <img
-              src="/logo.png"
-              alt="Korals Design Logo"
-              className="h-10 w-auto flex-shrink-0 rounded-xl border border-slate-700/80 bg-black px-2 py-1 object-contain shadow-md"
-            />
-          )}
           <div className="min-w-0">
-            <h1 className={`truncate font-black uppercase leading-tight text-white ${isManagementDashboard ? 'text-base tracking-wide' : 'text-xs tracking-wider'}`}>
+            <h1 className="truncate text-base font-black uppercase leading-tight tracking-wide text-white">
               KORALS DESIGN
             </h1>
             <h2 className="mt-1 text-[11px] font-bold leading-tight tracking-tight text-blue-400">
@@ -150,23 +152,13 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Navigation Menu */}
       <div className={`flex-1 overflow-y-auto px-3 ${isManagementDashboard ? 'py-4' : 'space-y-5 py-4'}`}>
         <div className="space-y-1">
-          {!isManagementDashboard && (
-            <p className="mb-1.5 px-3 text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8]">
-              {isProjectHead ? 'PROJECT HEAD MENU' : 'EMPLOYEE MENU'}
-            </p>
-          )}
           {renderNavButtons()}
         </div>
       </div>
 
       {/* User Info & Sign Out */}
       <div className="border-t border-slate-800/80 p-4">
-        <div className={`mb-3 rounded-xl border border-slate-700/40 bg-slate-800/60 ${isManagementDashboard ? 'p-3' : 'flex items-center gap-3 p-2.5'}`}>
-          {!isManagementDashboard && (
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm">
-              {user?.name?.charAt(0) || user?.email?.charAt(0).toUpperCase() || 'D'}
-            </div>
-          )}
+        <div className={`mb-3 rounded-lg border border-slate-700/40 bg-slate-800/60 ${isManagementDashboard ? 'p-3' : 'p-3'}`}>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-white truncate">
               {user?.name || user?.email}
@@ -227,7 +219,15 @@ const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       {/* Desktop Fixed Sidebar */}
-      <div className="hidden md:flex w-64 h-screen fixed left-0 top-0 z-20 shadow-xl border-r border-slate-800 flex-col">
+      <div
+        className={`hidden md:flex ${isDirector ? 'w-64' : 'w-[266px]'} h-screen fixed left-0 top-0 z-20 shadow-xl border-r border-slate-800 flex-col`}
+        style={isDirector ? {
+          left: 'max(0px, calc((100vw - 1308px) / 2))',
+          top: 10,
+          bottom: 10,
+          height: 'auto'
+        } : undefined}
+      >
         {navContent}
       </div>
     </>

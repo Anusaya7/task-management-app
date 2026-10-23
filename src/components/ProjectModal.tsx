@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Project, ProjectRemark, ProjectStatus } from '../types';
-import { X, Save, AlertCircle } from 'lucide-react';
+import { X, AlertCircle } from 'lucide-react';
 import { normalizeProjectStatus } from '@/lib/projectStatus';
 
 interface ProjectModalProps {
@@ -24,11 +24,11 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   onSave
 }) => {
   const [projectName, setProjectName] = useState('');
-  const [projectNumber, setProjectNumber] = useState('');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
-  const [contactDetails, setContactDetails] = useState('');
-  const [status, setStatus] = useState<ProjectStatus>('Ongoing');
+  const [startDate, setStartDate] = useState('');
+  const [newRemark, setNewRemark] = useState('');
+  const [status, setStatus] = useState<ProjectStatus>('Upcoming');
   const [remarks, setRemarks] = useState<ProjectRemark[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -61,10 +61,10 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
 
     if (project) {
       setProjectName(project.projectName || (project as any).name || '');
-      setProjectNumber(project.projectNumber || '');
       setLocation(project.location || '');
       setDescription(project.description || '');
-      setContactDetails(project.contactDetails || '');
+      setStartDate(project.startDate ? toDateInputValue(project.startDate) : '');
+      setNewRemark('');
       setStatus(normalizeProjectStatus(project.status));
       setRemarks((project.projectRemarks || []).map((item) => ({
         _id: item._id,
@@ -74,11 +74,11 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       })));
     } else {
       setProjectName('');
-      setProjectNumber('');
       setLocation('');
       setDescription('');
-      setContactDetails('');
-      setStatus('Ongoing');
+      setStartDate(todayKolkata());
+      setNewRemark('');
+      setStatus('Upcoming');
       setRemarks([]);
     }
     setError('');
@@ -94,12 +94,12 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       setError('Project Name is required.');
       return;
     }
-    if (!projectNumber.trim()) {
-      setError('Project Number is required.');
-      return;
-    }
     if (!description.trim()) {
       setError('Project Description is required.');
+      return;
+    }
+    if (!location.trim()) {
+      setError('Project Location is required.');
       return;
     }
 
@@ -115,12 +115,13 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
     try {
       const payload: Record<string, unknown> = {
         projectName: projectName.trim(),
-        projectNumber: projectNumber.trim(),
+        projectNumber: project?.projectNumber || undefined,
         location: location.trim(),
         description: description.trim(),
-        contactDetails: contactDetails.trim(),
+        startDate,
         status,
-        projectRemarks: allRemarks
+        projectRemarks: allRemarks,
+        ...(project ? { newRemark: newRemark.trim() } : { initialRemark: description.trim() })
       };
       const existingId = project?.id || project?._id;
       if (existingId) payload.id = existingId;
@@ -134,140 +135,140 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto border border-slate-200">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 sticky top-0 z-10">
-          <h3 className="text-lg font-bold text-slate-800">
-            {project ? 'Edit Project' : 'Create New Project'}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+      <div className="flex max-h-[90vh] min-h-[min(580px,calc(100dvh-2rem))] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-[#25527a] bg-[#25527a] px-5 py-3 sm:px-6">
+          <h3 className="text-lg font-bold text-white">
+            {project ? 'Edit Project' : 'New Project (pop-up window)'}
           </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded p-1 text-white/90 transition hover:bg-white/10 hover:text-white"
+          >
             <X size={20} />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium">
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+            {error && (
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
+                <AlertCircle size={16} />
+                <span>{error}</span>
+              </div>
+            )}
 
-          {/* 1. Project Name */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              1. Project Name *
-            </label>
-            <input
-              type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="e.g. Commercial Complex - Tower A"
-              required
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          {/* 2. Project Number */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                2. Project Number *
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
+              <label className="block text-sm font-semibold text-slate-600">
+                Project name *
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={event => setProjectName(event.target.value)}
+                  placeholder="Project name"
+                  required
+                  className="mt-1 w-full rounded-lg border border-red-500 bg-white px-2 py-2 text-sm font-normal text-red-600 placeholder:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
               </label>
-              <input
-                type="text"
-                value={projectNumber}
-                onChange={(e) => setProjectNumber(e.target.value)}
-                placeholder="e.g. 2026-001"
-                required
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
 
-            {/* Lifecycle Status Dropdown */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Project Status
+              <label className="block text-sm font-semibold text-slate-600">
+                Location *
+                <input
+                  type="text"
+                  value={location}
+                  onChange={event => setLocation(event.target.value)}
+                  placeholder="Project location"
+                  required
+                  className="mt-1 w-full rounded-lg border border-red-500 bg-white px-2 py-2 text-sm font-normal text-red-600 placeholder:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
               </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as ProjectStatus)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
-              >
-                {PROJECT_STATUSES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-          </div>
 
-          {/* 3. Location */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              3. Location
-            </label>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="e.g. Mumbai, Maharashtra"
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          {/* 4. Description */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              4. Project Description *
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              placeholder="Enter comprehensive project scope..."
-              required
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          {project && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                5. Contact Details
+              <label className="block text-sm font-semibold text-slate-600">
+                Status *
+                <select
+                  value={status}
+                  onChange={event => setStatus(event.target.value as ProjectStatus)}
+                  className="mt-1 w-full rounded-lg border border-red-500 bg-white px-2 py-2 text-sm font-normal text-red-600 focus:outline-none focus:ring-1 focus:ring-red-500"
+                >
+                  {PROJECT_STATUSES.map(value => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
               </label>
-              <input
-                type="text"
-                value={contactDetails}
-                onChange={(e) => setContactDetails(e.target.value)}
-                placeholder="Client Contact / Phone / Email"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          )}
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
-            >
-              Cancel
-            </button>
+              <label className="block text-sm font-semibold text-slate-600">
+                Start date
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={event => setStartDate(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-red-500 bg-white px-2 py-2 text-sm font-normal text-red-600 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-600 sm:col-span-1">
+                Description / first comment *
+                <input
+                  type="text"
+                  value={description}
+                  onChange={event => setDescription(event.target.value)}
+                  placeholder="Project description (this is also the first comment)"
+                  required
+                  className="mt-1 w-full rounded-lg border border-red-500 bg-white px-2 py-2 text-sm font-normal text-red-600 placeholder:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
+              </label>
+
+              {project && (
+                <div className="space-y-3 sm:col-span-2">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-600">Date-wise Remarks</h4>
+                    {remarks.length > 0 ? (
+                      <ol className="mt-2 max-h-32 space-y-2 overflow-y-auto">
+                        {remarks.map((remark, index) => (
+                          <li key={remark._id || `${remark.date}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold text-slate-500">{remark.date}</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{remark.remark}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-500">No dated remarks recorded.</p>
+                    )}
+                  </div>
+                  <label className="block text-sm font-semibold text-slate-600">
+                    Add Today&apos;s Remark
+                    <textarea
+                      value={newRemark}
+                      onChange={event => setNewRemark(event.target.value)}
+                      rows={2}
+                      placeholder="Add a dated project update"
+                      className="mt-1 w-full rounded-lg border border-red-500 bg-white px-2 py-2 text-sm font-normal text-red-600 placeholder:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+
+          </div>
+
+          <div className="flex shrink-0 flex-col gap-2 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:px-7">
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-lg shadow-sm transition disabled:opacity-60"
+              className="rounded-lg bg-[#16A34A] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#15803D] disabled:cursor-not-allowed disabled:opacity-60 sm:w-[334px]"
             >
-              <Save size={16} />
-              <span>{isSubmitting ? 'Saving...' : 'Save Project'}</span>
+              {isSubmitting ? 'Saving...' : 'Save Project'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-slate-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-600 sm:w-[158px]"
+            >
+              Cancel
             </button>
           </div>
-
         </form>
       </div>
     </div>
