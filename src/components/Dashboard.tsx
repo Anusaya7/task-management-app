@@ -3685,6 +3685,14 @@ const Dashboard: React.FC = () => {
               >
                 New Task +
               </button>
+              <button
+                type="button"
+                onClick={() => void removeSelectedTasks()}
+                disabled={selectedTaskIds.length === 0}
+                className="min-h-[38px] min-w-[198px] rounded-lg bg-[#DC2626] px-5 py-2 text-sm font-bold text-white hover:bg-[#B91C1C] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Delete Selected Tasks
+              </button>
             </div>
 
           </section>
@@ -4569,6 +4577,7 @@ const Dashboard: React.FC = () => {
           task={selectedTask}
           personalTask={personalTaskMode}
           projectHeadWorkflow={isProjectHead && activeTab === 'tasks'}
+          directorTaskAllotmentEdit={isDirectorTaskAllotmentView}
           projects={projects}
           employees={employees}
           existingTasks={tasks}

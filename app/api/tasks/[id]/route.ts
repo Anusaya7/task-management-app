@@ -6,7 +6,10 @@ import Employee from '@/models/Employee'
 import PrivateRating from '@/models/PrivateRating'
 import DailyEntry from '@/models/DailyEntry'
 import Flag from '@/models/Flag'
+import Notification from '@/models/Notification'
 import Reminder from '@/models/Reminder'
+import TaskHistory from '@/models/TaskHistory'
+import TaskAssignmentHistory from '@/models/TaskAssignmentHistory'
 import { ensureTaskCodes } from '@/lib/hierarchyCodes'
 import { getAuthUser } from '@/lib/auth'
 import { ensureAssigneeProgress, serializeTaskWithAssignees } from '@/lib/assigneeProgress'
@@ -147,10 +150,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       }).select('_id status assignedProjects')
       if (
         !coordinator ||
-        normalizeEmployeeStatus(coordinator.status) !== 'Active' ||
-        !(coordinator.assignedProjects || []).includes(task.projectId)
+        normalizeEmployeeStatus(coordinator.status) !== 'Active'
       ) {
-        return NextResponse.json({ error: 'Select an active Project Co-ordinator assigned to this project.' }, { status: 400 })
+        return NextResponse.json({ error: 'Select an active Project Co-ordinator.' }, { status: 400 })
       }
       task.projectHeadId = coordinator._id.toString()
     }
@@ -235,6 +237,12 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (projectMoved || parentMoved) task.taskCode = undefined
     task.updatedAt = new Date()
     await task.save()
+    if (user.role === 'Director' && task.projectHeadId) {
+      await Employee.updateOne(
+        { _id: task.projectHeadId },
+        { $addToSet: { assignedProjects: task.projectId } }
+      )
+    }
 
     if (user.role === 'Director' || user.role === 'Project Head') {
       const openFlags = await Flag.find({ taskId: task._id.toString(), status: 'Open' })
@@ -324,7 +332,24 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     }
 
     await connectToDatabase()
-    await Task.findByIdAndDelete(params.id)
+    const task = await Task.findById(params.id).select('_id')
+    if (!task) {
+      return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    }
+
+    const taskId = task._id.toString()
+    const subtasks = await Task.find({ parentTaskId: taskId }).select('_id')
+    const taskIds = [taskId, ...subtasks.map(subtask => subtask._id.toString())]
+    await Promise.all([
+      Task.deleteMany({ _id: { $in: taskIds } }),
+      DailyEntry.deleteMany({ taskId: { $in: taskIds } }),
+      Flag.deleteMany({ taskId: { $in: taskIds } }),
+      Notification.deleteMany({ taskId: { $in: taskIds } }),
+      Reminder.deleteMany({ taskId: { $in: taskIds } }),
+      TaskHistory.deleteMany({ taskId: { $in: taskIds } }),
+      TaskAssignmentHistory.deleteMany({ taskId: { $in: taskIds } }),
+      PrivateRating.deleteMany({ taskId: { $in: taskIds } })
+    ])
     return NextResponse.json({ success: true, message: 'Task deleted successfully' })
   } catch (error: any) {
     console.error('Task DELETE API error:', error)

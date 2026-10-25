@@ -13,6 +13,7 @@ interface TaskModalProps {
   isOpen: boolean;
   personalTask?: boolean;
   projectHeadWorkflow?: boolean;
+  directorTaskAllotmentEdit?: boolean;
   onClose: () => void;
   onSave: (taskData: any) => Promise<void>;
   onDelete?: (task: Task) => void;
@@ -36,6 +37,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   isOpen,
   personalTask = false,
   projectHeadWorkflow = false,
+  directorTaskAllotmentEdit = false,
   onClose,
   onSave,
   onDelete,
@@ -47,6 +49,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const projectHeadFormLayout = projectHeadWorkflow && isProjectHead;
   const projectHeadEditLayout = projectHeadFormLayout && Boolean(task);
   const projectHeadCreateLayout = projectHeadFormLayout && !task;
+  const directorTaskAllotmentEditLayout = directorTaskAllotmentEdit && user?.role === 'Director' && Boolean(task);
   const isManagementUser = user?.role === 'Director' || user?.role === 'Project Head';
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -159,10 +162,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const assignableCoordinators = useMemo(
     () => employees.filter(emp =>
       emp.role === 'Project Head' &&
-      (emp.status === 'Active' || !emp.status) &&
-      (!projectId || (emp.assignedProjects || []).includes(projectId))
+      (emp.status === 'Active' || !emp.status)
     ),
-    [employees, projectId]
+    [employees]
   );
 
   const projectKey = (project: Project) => String(project.id || project._id || '');
@@ -171,6 +173,19 @@ const TaskModal: React.FC<TaskModalProps> = ({
     () => projects.find(p => projectKey(p) === String(projectId)) || null,
     [projects, projectId]
   );
+
+  const directorTaskComments = useMemo(() => {
+    if (!task) return [];
+    const parentId = String(task.id || (task as any)._id || '');
+    const relatedTasks = [task, ...existingTasks.filter(item =>
+      String(item.parentTaskId || '') === parentId && String(item.id || (item as any)._id || '') !== parentId
+    )];
+    return relatedTasks
+      .flatMap(relatedTask => relatedTask.comments || [])
+      .sort((first, second) => new Date(first.timestamp || 0).getTime() - new Date(second.timestamp || 0).getTime())
+      .slice(-5)
+      .reverse();
+  }, [task, existingTasks]);
 
   const projectTaskOptions = useMemo(() => {
     type Option = { key: string; title: string; date?: string; priority?: TaskPriority };
@@ -240,7 +255,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
     const existing = projectTaskOptions.find(option => option.key === key)?.priority;
     return existing && isDirectorPriority(existing) ? existing : 'Urgent';
   };
-  const hideTitleField = showProjectTaskList || projectHeadEditLayout;
+  const hideTitleField = showProjectTaskList || projectHeadEditLayout || directorTaskAllotmentEditLayout;
 
   const getEmpId = (emp: Employee) => emp.id || emp._id || '';
   const getEmpName = (emp: Employee) => {
@@ -260,7 +275,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   if (!isOpen) return null;
 
   const heading = task
-    ? projectHeadEditLayout ? 'Edit Task (pop-up window)' : 'Edit Task'
+    ? projectHeadEditLayout || directorTaskAllotmentEditLayout ? 'Edit Task (pop-up window)' : 'Edit Task'
     : projectHeadCreateLayout
       ? 'New Task - allot to Employee (pop-up window)'
       : personalTaskLayout
@@ -304,7 +319,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
     e.preventDefault();
     if (submitLockRef.current || isSubmitting) return;
 
-    const trimmedTitle = projectHeadEditLayout ? task?.title?.trim() || '' : hideTitleField ? '' : title.trim();
+    const trimmedTitle = projectHeadEditLayout || directorTaskAllotmentEditLayout
+      ? task?.title?.trim() || ''
+      : hideTitleField ? '' : title.trim();
     const selectedItems = [
       ...projectTaskOptions.filter(item => selectedRemarkKeys.includes(item.key)),
       ...customTasks
@@ -539,12 +556,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-3 sm:p-4">
-      <div className="my-auto flex w-full max-w-5xl max-h-[calc(100dvh-1rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:max-h-[min(90dvh,calc(100dvh-2rem))]">
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[#25527a] bg-[#25527a] px-5 py-4 sm:px-6">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-3 sm:p-4 ${directorTaskAllotmentEditLayout ? 'bg-slate-900/45' : 'bg-slate-900/60'}`}>
+      <div className={`my-auto flex w-full flex-col overflow-hidden border border-slate-200 bg-white shadow-2xl ${directorTaskAllotmentEditLayout ? 'max-h-[min(90dvh,calc(100dvh-2rem))] max-w-[940px] rounded-md' : 'max-h-[calc(100dvh-1rem)] max-w-5xl rounded-xl sm:max-h-[min(90dvh,calc(100dvh-2rem))]'}`}>
+        <div className={`flex shrink-0 items-start justify-between gap-4 border-b border-[#25527a] bg-[#25527a] ${directorTaskAllotmentEditLayout ? 'px-5 py-2.5 sm:px-5' : 'px-5 py-4 sm:px-6'}`}>
           <div>
-            <h3 className="text-lg font-bold text-white">{heading}</h3>
-            {!personalTaskLayout && <p className="mt-1 text-xs font-medium text-blue-100">{subtitle}</p>}
+            <h3 className={`${directorTaskAllotmentEditLayout ? 'text-xl' : 'text-lg'} font-bold text-white`}>{heading}</h3>
+            {!personalTaskLayout && !directorTaskAllotmentEditLayout && <p className="mt-1 text-xs font-medium text-blue-100">{subtitle}</p>}
           </div>
           <button
             type="button"
@@ -557,7 +574,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-7 sm:py-6">
+          <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${directorTaskAllotmentEditLayout ? 'px-5 py-4 sm:px-7 sm:py-5' : 'px-5 py-4 sm:px-7 sm:py-6'}`}>
           {error && (
               <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
                 <AlertCircle size={16} className="shrink-0" />
@@ -589,7 +606,94 @@ const TaskModal: React.FC<TaskModalProps> = ({
               </div>
             )}
 
-            {task && isManagementUser && !projectHeadEditLayout && (
+            {directorTaskAllotmentEditLayout && task && (
+              <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,0.51fr)_minmax(0,1fr)]">
+                <section className="min-h-[190px] rounded-md border border-[#CBD5E1] bg-[#F8FAFC] px-4 py-2.5 text-xs leading-[15px] text-[#26364D] sm:min-h-[246px]" aria-label="Task details">
+                  <p className="font-bold text-[#1E293B]">{task.projectName || selectedProject?.projectName || 'Project'}/{task.title}</p>
+                  {existingTasks.filter(item => String(item.parentTaskId || '') === String(task.id || (task as any)._id || '')).map(subtask => (
+                    <p key={subtask.id || (subtask as any)._id} className="mt-0.5 break-words">{task.projectName || selectedProject?.projectName || 'Project'}/{task.title}/{subtask.title}</p>
+                  ))}
+                  <p className="mt-0.5 whitespace-pre-wrap text-[11px] italic leading-tight text-[#64748B]">{task.description || '-'}</p>
+                </section>
+                <section className="min-h-[190px] rounded-md border border-[#CBD5E1] bg-white px-4 py-2.5 text-xs leading-[16px] text-[#1E293B] sm:min-h-[246px]" aria-label="Latest task comments">
+                  <h4 className="mb-0.5 text-sm font-bold text-[#64748B]">Latest 5 comments</h4>
+                  {directorTaskComments.length ? (
+                    <ol className="space-y-0.5">
+                      {directorTaskComments.map((comment, index) => (
+                        <li key={`${comment.id || index}-${comment.timestamp}`} className="break-words">
+                          {comment.content}
+                          {comment.timestamp ? ` (${new Date(comment.timestamp).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })})` : ''}
+                          {comment.userName ? ` (${comment.userName})` : ''}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : <p className="italic text-[#94A3B8]">No comments yet.</p>}
+                </section>
+              </div>
+            )}
+
+            {directorTaskAllotmentEditLayout && (
+              <>
+                <div className="grid grid-cols-1 gap-x-5 gap-y-2 sm:grid-cols-3">
+                  <label className="block text-xs font-bold text-[#475569]">
+                    Priority
+                    <select value={priority} onChange={event => setPriority(event.target.value as TaskPriority)} className="mt-1.5 h-[38px] w-full rounded-md border border-[#F04444] bg-white px-2 text-sm font-normal text-[#E32929] focus:outline-none focus:ring-1 focus:ring-[#F04444]">
+                      {DIRECTOR_PRIORITIES.filter(option => option.value !== 'Self' || task?.priority === 'Self').map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div ref={employeeMenuRef} className="relative">
+                    <label className="block text-xs font-bold text-[#475569]" htmlFor="director-task-employee">Employee in charge</label>
+                    <button
+                      id="director-task-employee"
+                      type="button"
+                      onClick={() => setIsEmployeeMenuOpen(open => !open)}
+                      className="mt-1.5 flex h-[38px] w-full items-center justify-between rounded-md border border-[#F04444] bg-white px-2 text-left text-sm text-[#E32929] focus:outline-none focus:ring-1 focus:ring-[#F04444]"
+                    >
+                      <span className="truncate">{selectedEmployees.map(getEmpName).join(', ') || 'Select employee'}</span>
+                      <ChevronDown size={14} className="shrink-0" />
+                    </button>
+                    {isEmployeeMenuOpen && (
+                      <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-48 overflow-y-auto rounded-md border border-[#CBD5E1] bg-white p-1 shadow-lg">
+                        {filteredEmployees.map(employee => {
+                          const employeeId = getEmpId(employee);
+                          const checked = selectedEmployeeIds.includes(employeeId);
+                          return (
+                            <button key={employeeId} type="button" onClick={() => toggleEmployeeSelect(employeeId)} className={`flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-xs ${checked ? 'bg-blue-50 font-semibold text-blue-900' : 'text-slate-700 hover:bg-slate-50'}`}>
+                              {getEmpName(employee)}
+                              {checked && <Check size={13} />}
+                            </button>
+                          );
+                        })}
+                        {filteredEmployees.length === 0 && <p className="px-2 py-2 text-xs text-slate-500">No employees found</p>}
+                      </div>
+                    )}
+                  </div>
+                  <label className="block text-xs font-bold text-[#475569]">
+                    Project Co-ordinator
+                    <select value={selectedCoordinatorId} onChange={event => setSelectedCoordinatorId(event.target.value)} className="mt-1.5 h-[38px] w-full rounded-md border border-[#F04444] bg-white px-2 text-sm font-normal text-[#E32929] focus:outline-none focus:ring-1 focus:ring-[#F04444]">
+                      <option value="">Select Project Co-ordinator</option>
+                      {assignableCoordinators.map(coordinator => (
+                        <option key={getEmpId(coordinator)} value={getEmpId(coordinator)}>
+                          {getEmpName(coordinator)}{projectId && !(coordinator.assignedProjects || []).includes(projectId) ? ' (add to project)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedCoordinatorId && projectId && !assignableCoordinators.find(coordinator => getEmpId(coordinator) === selectedCoordinatorId)?.assignedProjects?.includes(projectId) && (
+                      <p className="mt-1 text-[11px] font-medium text-[#64748B]">This coordinator will be added to the selected project when the task is assigned.</p>
+                    )}
+                  </label>
+                </div>
+                <label className="mt-3 block text-xs font-bold text-[#475569]">
+                  Your comment (optional) - forwarded to employee
+                  <textarea value={forwardComment} onChange={event => setForwardComment(event.target.value)} rows={2} placeholder="Add comment and forward..." className="mt-1.5 h-[46px] w-full resize-none rounded-md border border-[#F04444] bg-white px-2 py-1.5 text-sm font-normal text-[#E32929] placeholder:text-[#F04444] focus:outline-none focus:ring-1 focus:ring-[#F04444]" />
+                </label>
+                <p className="mt-1.5 text-[11px] italic leading-[14px] text-[#64748B]">Details above are for reading; change Priority / Employee only if required. Red = editable.<br />After submitting Task by Director, the Flag will get removed automatically.</p>
+              </>
+            )}
+
+            {task && isManagementUser && !projectHeadEditLayout && !directorTaskAllotmentEditLayout && (
               <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" aria-label="Task comment history">
                 <div>
                   <h4 className="text-sm font-bold text-slate-700">Latest 5 comments</h4>
@@ -620,7 +724,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             )}
 
             <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
-            {!projectHeadEditLayout && <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 1 : undefined }}>
+            {!projectHeadEditLayout && !directorTaskAllotmentEditLayout && <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 1 : undefined }}>
               <label className="mb-1 block text-sm font-semibold text-slate-700">
                 Project *
               </label>
@@ -802,7 +906,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
             )}
 
-            {user?.role === 'Director' && !isPersonalTask && !showProjectTaskList && (
+            {user?.role === 'Director' && !isPersonalTask && !showProjectTaskList && !directorTaskAllotmentEditLayout && (
             <div>
               <label className="mb-1 block text-sm font-semibold text-slate-700">
                 Project Co-ordinator *
@@ -824,16 +928,19 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   const id = getEmpId(coordinator);
                   return (
                     <option key={id} value={id}>
-                      {getEmpName(coordinator)}
+                      {getEmpName(coordinator)}{projectId && !(coordinator.assignedProjects || []).includes(projectId) ? ' (add to project)' : ''}
                     </option>
                   );
                 })}
               </select>
+              {selectedCoordinatorId && projectId && !assignableCoordinators.find(coordinator => getEmpId(coordinator) === selectedCoordinatorId)?.assignedProjects?.includes(projectId) && (
+                <p className="mt-1 text-[11px] font-medium text-[#64748B]">This coordinator will be added to the selected project when the task is assigned.</p>
+              )}
               {fieldErrors.coordinator && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.coordinator}</p>}
             </div>
             )}
 
-            {!showProjectTaskList && (
+            {!showProjectTaskList && !directorTaskAllotmentEditLayout && (
               <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 4 : undefined }}>
               <label className="mb-1 block text-sm font-semibold text-slate-700">
                 Priority *
@@ -852,7 +959,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
             )}
 
-            {!isEmployee && !isPersonalTask && (!showProjectTaskList || Boolean(title.trim())) && (
+            {!isEmployee && !isPersonalTask && !directorTaskAllotmentEditLayout && (!showProjectTaskList || Boolean(title.trim())) && (
               <div ref={employeeMenuRef} className={projectHeadFormLayout ? 'sm:col-span-1' : 'sm:col-span-2'} style={{ order: projectHeadCreateLayout ? 7 : undefined }}>
                 <label className="mb-1 block text-sm font-semibold text-slate-700">
                   {projectHeadEditLayout ? 'Employee in charge' : showProjectTaskList ? 'Assign Employees to Additional Task *' : 'Assigned to *'}
@@ -940,7 +1047,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
             {projectHeadCreateLayout && <div className="hidden sm:block" style={{ order: 8 }} aria-hidden="true" />}
 
-            {!showProjectTaskList && !projectHeadEditLayout && (
+            {!showProjectTaskList && !projectHeadEditLayout && !directorTaskAllotmentEditLayout && (
           <div style={{ order: projectHeadCreateLayout ? 10 : personalTaskLayout ? 8 : undefined }}>
                 <label className="mb-1 block text-sm font-semibold text-slate-700">
               {!task ? 'Description / first comment *' : 'Task Description'}
@@ -971,7 +1078,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   </div>
             )}
 
-          {!projectHeadEditLayout && <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 5 : undefined }}>
+          {!projectHeadEditLayout && !directorTaskAllotmentEditLayout && <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 5 : undefined }}>
                   <label className="mb-1 block text-sm font-semibold text-slate-700">
                     Start date *
             </label>
@@ -985,7 +1092,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             {fieldErrors.startDate && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.startDate}</p>}
           </div>}
 
-          {!projectHeadEditLayout && <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 6 : undefined }}>
+          {!projectHeadEditLayout && !directorTaskAllotmentEditLayout && <div style={{ order: projectHeadCreateLayout || personalTaskLayout ? 6 : undefined }}>
                   <label className="mb-1 block text-sm font-semibold text-slate-700">
                     Due date *
             </label>
@@ -1000,7 +1107,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             {fieldErrors.dueDate && <p className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrors.dueDate}</p>}
           </div>}
 
-          {!projectHeadEditLayout && <div style={{ order: projectHeadCreateLayout ? 9 : personalTaskLayout ? 7 : undefined }}>
+          {!projectHeadEditLayout && !directorTaskAllotmentEditLayout && <div style={{ order: projectHeadCreateLayout ? 9 : personalTaskLayout ? 7 : undefined }}>
                   <label className="mb-1 block text-sm font-semibold text-slate-700">
                     {isEmployee || isPersonalTask ? 'Reminder to myself' : 'Reminder to assignee'}
             </label>
@@ -1026,7 +1133,27 @@ const TaskModal: React.FC<TaskModalProps> = ({
           )}
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-start sm:gap-3 sm:px-7">
+          <div className={`flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:px-7 ${directorTaskAllotmentEditLayout ? 'sm:gap-2.5' : 'sm:justify-start sm:gap-3'}`}>
+            {directorTaskAllotmentEditLayout ? (
+              <>
+                <button type="submit" disabled={isSubmitting} className="min-h-[44px] w-full rounded-md bg-[#2563EB] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-60 sm:flex-[1.18]">
+                  {primaryLabel}
+                </button>
+                <button type="button" onClick={onClose} className="min-h-[44px] w-full rounded-md bg-[#64748B] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#475569] sm:flex-[0.54]">
+                  Cancel
+                </button>
+                {task && onDelete && (
+                  <button type="button" onClick={() => onDelete(task)} disabled={isSubmitting} className="min-h-[44px] w-full rounded-md bg-[#DC2626] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#B91C1C] disabled:opacity-60 sm:flex-[0.78]">
+                    Delete Task
+                  </button>
+                )}
+                {task && onComplete && task.status !== 'Completed' && (
+                  <button type="button" onClick={() => void onComplete(task)} disabled={isSubmitting} className="min-h-[44px] w-full rounded-md bg-[#16A34A] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#15803D] disabled:opacity-60 sm:flex-[1.02]">
+                    Completed Task
+                  </button>
+                )}
+              </>
+            ) : <>
             {task && isManagementUser && onDelete && (
               <button
                 type="button"
@@ -1061,6 +1188,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             >
               Cancel
             </button>
+            </>}
           </div>
         </form>
       </div>

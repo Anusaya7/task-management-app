@@ -68,3 +68,18 @@ export function parseTimeInput(value: unknown): { ok: true; hours: number } | { 
 
   return { ok: true, hours: Math.round(hours * 60) / 60 }
 }
+
+export function parseClockTimeInput(value: unknown): { ok: true; hours: number } | { ok: false; error: string } {
+  if (typeof value === 'string') {
+    const raw = value.trim()
+    const dottedTime = raw.match(/^(\d{1,2})\.(\d{2})$/)
+    if (dottedTime) {
+      return parseTimeInput(`${dottedTime[1]}:${dottedTime[2]}`)
+    }
+    if (raw.includes('.') && /^\d+\.\d+$/.test(raw)) {
+      return { ok: false, error: 'Use HH.MM or HH:MM (e.g. 00.15 or 00:15); minutes must have two digits.' }
+    }
+  }
+
+  return parseTimeInput(value)
+}

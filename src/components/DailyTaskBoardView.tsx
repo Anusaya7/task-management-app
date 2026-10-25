@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Task, DailyEntry } from '../types';
 import { X, Plus, AlertCircle, Check } from 'lucide-react';
+import { hoursToHHMM, parseClockTimeInput, MAX_DAILY_HOURS } from '@/lib/timeFormat';
+import { formatHoursMinutes } from './BadgeUtils';
 
 interface DailyTaskBoardViewProps {
   user: any;
@@ -36,16 +38,21 @@ const getCurrentKolkataDate = (): string => {
 const formatCommentDate = (dateStr: string, createdAt?: Date | string): string => {
   const d = createdAt ? new Date(createdAt) : new Date(`${String(dateStr || '').substring(0, 10)}T12:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr || '-';
-  const day = d.getDate();
+  const day = Number(new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' }).format(d));
   const suffix = ['th', 'st', 'nd', 'rd'][(day % 10 > 3 || Math.floor((day % 100) / 10) === 1) ? 0 : day % 10];
-  const month = d.toLocaleDateString('en-GB', { month: 'short' });
-  const time = createdAt ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
+  const month = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).format(d);
+  const time = createdAt ? new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  }).format(d) : '';
   return `${day}${suffix} ${month}${time ? `, ${time}` : ''}`;
 };
 
 const formatHoursDisplay = (hours: number): string => {
   if (!hours || hours <= 0) return '-';
-  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+  return formatHoursMinutes(hours);
 };
 
 export const getShortName = (name?: string, fallback = 'User'): string => {
@@ -118,47 +125,45 @@ export default function DailyTaskBoardView({
   }, [tasks, boardTaskIds]);
 
   // Today's logged hours already saved in DB
-  const todayLoggedHours = useMemo(() => {
-    const logged = dailyEntries
+  const todayLoggedMinutes = useMemo(() => {
+    return dailyEntries
       .filter(entry => entry.employeeId === signedInUserId && entry.date === todayStr)
-      .reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
-    return Number(logged.toFixed(2));
+      .reduce((sum, entry) => sum + Math.round((Number(entry.hours) || 0) * 60), 0);
   }, [dailyEntries, signedInUserId, todayStr]);
 
   // Current draft hours entered in inputs
-  const draftHours = useMemo(() => {
-    const draft = boardTasks.reduce((total, task) => {
+  const draftMinutes = useMemo(() => {
+    return boardTasks.reduce((total, task) => {
       const edit = boardEdits[taskKey(task)];
-      const h = parseFloat(edit?.hours || '0');
-      return total + (Number.isFinite(h) && h > 0 ? h : 0);
+      const parsed = parseClockTimeInput(edit?.hours);
+      return total + (parsed.ok ? Math.round(parsed.hours * 60) : 0);
     }, 0);
-    return Number(draft.toFixed(2));
   }, [boardTasks, boardEdits]);
 
-  const totalLoggedHours = Number((todayLoggedHours + draftHours).toFixed(2));
-  const freeHours = Math.max(0, Number((8 - totalLoggedHours).toFixed(2)));
+  const totalLoggedMinutes = todayLoggedMinutes + draftMinutes;
+  const freeMinutes = Math.max(0, MAX_DAILY_HOURS * 60 - totalLoggedMinutes);
 
-  const loggedBarWidth = `${Math.min(100, (totalLoggedHours / 8) * 100)}%`;
-  const freeBarWidth = `${Math.max(0, 100 - Math.min(100, (totalLoggedHours / 8) * 100))}%`;
+  const loggedBarWidth = `${Math.min(100, (totalLoggedMinutes / (MAX_DAILY_HOURS * 60)) * 100)}%`;
+  const freeBarWidth = `${Math.max(0, 100 - Math.min(100, (totalLoggedMinutes / (MAX_DAILY_HOURS * 60)) * 100))}%`;
 
-  // Free time breakdown string: e.g. (4 h + 2 h + 1 h = 7 h, so 1 h free)
+  // Keep all displayed durations in HH:MM so decimal hours cannot be mistaken for minutes.
   const breakdownString = useMemo(() => {
     const parts: string[] = [];
     boardTasks.forEach(task => {
       const edit = boardEdits[taskKey(task)];
-      const h = parseFloat(edit?.hours || '0');
-      if (Number.isFinite(h) && h > 0) {
-        parts.push(`${Number.isInteger(h) ? h : h.toFixed(1)} h`);
+      const parsed = parseClockTimeInput(edit?.hours);
+      if (parsed.ok) {
+        parts.push(hoursToHHMM(parsed.hours));
       }
     });
 
     if (parts.length > 0) {
-      return `(${parts.join(' + ')} = ${totalLoggedHours} h, so ${freeHours} h free)`;
-    } else if (todayLoggedHours > 0) {
-      return `(${todayLoggedHours} h = ${todayLoggedHours} h, so ${freeHours} h free)`;
+      return `(${parts.join(' + ')} = ${hoursToHHMM(totalLoggedMinutes / 60)}, so ${hoursToHHMM(freeMinutes / 60)} free)`;
+    } else if (todayLoggedMinutes > 0) {
+      return `(${hoursToHHMM(todayLoggedMinutes / 60)} logged, so ${hoursToHHMM(freeMinutes / 60)} free)`;
     }
-    return `(0 h = 0 h, so 8 h free)`;
-  }, [boardTasks, boardEdits, totalLoggedHours, freeHours, todayLoggedHours]);
+    return `(00:00 logged, so ${hoursToHHMM(MAX_DAILY_HOURS)} free)`;
+  }, [boardTasks, boardEdits, totalLoggedMinutes, freeMinutes, todayLoggedMinutes]);
 
   const handleUpdateComment = (taskId: string, comment: string) => {
     setBoardEdits(prev => ({
@@ -221,12 +226,12 @@ export default function DailyTaskBoardView({
     const prepared = boardTasks.map(task => {
       const id = taskKey(task);
       const edit = boardEdits[id] || { comment: '', hours: '', flagged: false };
-      const hoursNum = parseFloat(edit.hours || '0');
+      const parsedHours = parseClockTimeInput(edit.hours);
       return {
         task,
         id,
         comment: (edit.comment || '').trim(),
-        hours: Number.isFinite(hoursNum) ? hoursNum : 0,
+        hours: parsedHours.ok ? parsedHours.hours : 0,
         flagged: Boolean(edit.flagged)
       };
     });
@@ -241,9 +246,9 @@ export default function DailyTaskBoardView({
     }
 
     // Check 8-hour daily limit
-    const submitTotal = prepared.reduce((sum, p) => sum + p.hours, 0);
-    if (todayLoggedHours + submitTotal > 8.01) {
-      const msg = `Daily time cannot exceed 8 hours. You have ${freeHours} hour(s) remaining today.`;
+    const submitTotalMinutes = prepared.reduce((sum, item) => sum + Math.round(item.hours * 60), 0);
+    if (todayLoggedMinutes + submitTotalMinutes > MAX_DAILY_HOURS * 60) {
+      const msg = `Daily time cannot exceed ${hoursToHHMM(MAX_DAILY_HOURS)}. You have ${hoursToHHMM(freeMinutes / 60)} remaining today.`;
       setErrorMessage(msg);
       if (showToast) showToast('error', msg);
       return;
@@ -503,14 +508,14 @@ export default function DailyTaskBoardView({
                         <div className="flex items-center justify-center text-xs font-bold text-red-600 min-h-[26px]">
                           <span className="text-red-600 font-bold text-sm">[</span>
                           <input
-                            type="number"
-                            min="0.25"
-                            max="8"
-                            step="0.25"
-                            placeholder="0"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="00.15"
+                            title="Enter HH.MM or HH:MM (00.15 = 15 minutes; 2.30 = 2 hours 30 minutes)"
+                            aria-label={`Hours for ${task.title} in HH.MM or HH:MM format`}
                             value={edit.hours}
                             onChange={e => handleUpdateHours(id, e.target.value)}
-                            className="w-8 text-center bg-transparent border-0 px-0.5 text-xs font-bold text-red-600 placeholder:text-red-300 focus:outline-none"
+                            className="w-[4.5rem] text-center bg-transparent border-0 px-1 text-xs font-bold text-red-600 placeholder:text-red-300 focus:outline-none"
                           />
                           <span className="text-red-600 font-bold text-sm">]</span>
                         </div>
@@ -550,18 +555,18 @@ export default function DailyTaskBoardView({
                 className="flex items-center justify-center bg-[#2563EB] text-xs font-bold text-white transition-all duration-200"
                 style={{ width: loggedBarWidth }}
               >
-                {totalLoggedHours > 0 ? `Logged ${totalLoggedHours} h` : ''}
+                {totalLoggedMinutes > 0 ? `Logged ${hoursToHHMM(totalLoggedMinutes / 60)}` : ''}
               </div>
               <div
                 className="flex items-center justify-center bg-[#16A34A] text-xs font-bold text-white transition-all duration-200"
                 style={{ width: freeBarWidth }}
               >
-                {freeHours > 0 ? `Free ${freeHours} h` : ''}
+                {freeMinutes > 0 ? `Free ${hoursToHHMM(freeMinutes / 60)}` : ''}
               </div>
             </div>
           </div>
           <p className="text-[11px] text-[#475569]">
-            Free time = 8 h - hours entered today {breakdownString}
+            Free time = {hoursToHHMM(MAX_DAILY_HOURS)} - hours entered today {breakdownString}
           </p>
         </div>
 

@@ -165,12 +165,8 @@ export async function POST(req: Request) {
         _id: projectHeadId,
         role: 'Project Head'
       }).select('_id status assignedProjects')
-      if (
-        !coordinator ||
-        normalizeEmployeeStatus(coordinator.status) !== 'Active' ||
-        !(coordinator.assignedProjects || []).includes(project._id.toString())
-      ) {
-        return NextResponse.json({ error: 'Select an active Project Co-ordinator assigned to this project.' }, { status: 400 })
+      if (!coordinator || normalizeEmployeeStatus(coordinator.status) !== 'Active') {
+        return NextResponse.json({ error: 'Select an active Project Co-ordinator.' }, { status: 400 })
       }
       projectCoordinatorId = coordinator._id.toString()
     } else if (user.role === 'Project Head') {
@@ -321,6 +317,12 @@ export async function POST(req: Request) {
         if (priority && existing.priority !== 'Self') existing.priority = taskPriority
         existing.updatedAt = new Date()
         await existing.save()
+        if (projectCoordinatorId) {
+          await Employee.updateOne(
+            { _id: projectCoordinatorId },
+            { $addToSet: { assignedProjects: project._id.toString() } }
+          )
+        }
 
         const assignerName = `${user.firstName} ${user.lastName}`
         for (const empId of newlyAssigned) {
@@ -428,6 +430,13 @@ export async function POST(req: Request) {
           }]
         }
       }))
+    }
+
+    if (projectCoordinatorId) {
+      await Employee.updateOne(
+        { _id: projectCoordinatorId },
+        { $addToSet: { assignedProjects: project._id.toString() } }
+      )
     }
 
     // Send Notifications

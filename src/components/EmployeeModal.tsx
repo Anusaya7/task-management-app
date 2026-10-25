@@ -72,7 +72,7 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setStatus('Active');
       setAssignedProjects([]);
       setAssignedEmployees([]);
-      setPassword('password'); // Default initial password
+      setPassword('');
       setNewPassword('');
     }
     setError('');
@@ -205,6 +205,21 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 className={inputClassName}
               />
             </div>
+            {!employee && (
+              <div>
+                <label htmlFor="employee-password" className="mb-1 block text-sm font-semibold text-[#334155]">Initial password *</label>
+                <input
+                  id="employee-password"
+                  type="password"
+                  value={password}
+                  onChange={event => setPassword(event.target.value)}
+                  autoComplete="new-password"
+                  required
+                  className={inputClassName}
+                />
+                <p className="mt-1 text-xs text-slate-500">Share this password with the employee so they can sign in with this email.</p>
+              </div>
+            )}
 
             <div>
               <label htmlFor="employee-phone" className="mb-1 block text-sm font-semibold text-[#334155]">Phone</label>
