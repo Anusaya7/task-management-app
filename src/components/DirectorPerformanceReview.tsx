@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Employee, EmployeePerformance, Task } from '../types'
 
 interface DirectorPerformanceReviewProps {
@@ -9,35 +9,51 @@ interface DirectorPerformanceReviewProps {
   tasks: Task[]
 }
 
-const reviewRows = [
-  { week: 'Week 1 / Month 1', tasksDone: 3, workHours: 38, freeHours: 2, selfMark: 8, coordinatorMark: 7, directorMark: 8 },
-  { week: 'Week 2 / Month 2', tasksDone: 4, workHours: 35, freeHours: 5, selfMark: 7, coordinatorMark: 7, directorMark: 7 },
-  { week: 'Week 3 / Month 3', tasksDone: 5, workHours: 28, freeHours: 12, selfMark: 6, coordinatorMark: 6, directorMark: 6 },
-  { week: 'Week 4 / Month 4', tasksDone: 3, workHours: 40, freeHours: 0, selfMark: 9, coordinatorMark: 8, directorMark: 8 }
-]
-
 const getMonday = (date: Date) => {
-  const monday = new Date(date)
-  const day = monday.getDay()
-  monday.setDate(monday.getDate() + (day === 0 ? -6 : 1 - day))
+  const monday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const day = monday.getUTCDay()
+  monday.setUTCDate(monday.getUTCDate() + (day === 0 ? -6 : 1 - day))
   return monday.toISOString().slice(0, 10)
+}
+
+const getReviewWeeks = (month: string) => {
+  const [year, monthNumber] = month.split('-').map(Number)
+  if (!year || !monthNumber) return []
+
+  const firstDay = new Date(Date.UTC(year, monthNumber - 1, 1))
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0))
+  const cursor = new Date(`${getMonday(firstDay)}T00:00:00.000Z`)
+  const weeks: Array<{ week: string; periodStart: string }> = []
+
+  while (cursor <= lastDay) {
+    weeks.push({ week: `Week ${weeks.length + 1}`, periodStart: cursor.toISOString().slice(0, 10) })
+    cursor.setUTCDate(cursor.getUTCDate() + 7)
+  }
+
+  return weeks
+}
+
+const formatAverage = (values: Array<number | undefined>) => {
+  const available = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  if (available.length === 0) return '—'
+  const average = available.reduce((sum, value) => sum + value, 0) / available.length
+  return Number.isInteger(average) ? String(average) : average.toFixed(1)
 }
 
 const DirectorPerformanceReview: React.FC<DirectorPerformanceReviewProps> = ({
   employees,
-  performanceData,
-  tasks
+  performanceData
 }) => {
   const [month, setMonth] = useState('2026-10')
   const [employeeId, setEmployeeId] = useState('all')
-  const [directorMarks, setDirectorMarks] = useState(reviewRows.map(row => String(row.directorMark)))
+  const [directorMarks, setDirectorMarks] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const reviewWeeks = useMemo(() => getReviewWeeks(month), [month])
 
   const selectedEmployees = employeeId === 'all'
     ? employees.filter(employee => employee.role === 'Employee')
     : employees.filter(employee => String(employee.id || employee._id) === employeeId)
-  const taskNames = tasks.filter(task => task.status === 'Completed').map(task => task.title).filter(Boolean)
   const monthOptions = Array.from({ length: 24 }, (_, index) => {
     const date = new Date(2026, index - 6, 1)
     const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -58,21 +74,16 @@ const DirectorPerformanceReview: React.FC<DirectorPerformanceReviewProps> = ({
     setIsSaving(true)
     setMessage('')
     try {
-      const [year, selectedMonth] = month.split('-').map(Number)
-      const monthStart = new Date(year, selectedMonth - 1, 1)
-      const firstMonday = new Date(`${getMonday(monthStart)}T00:00:00`)
       const results = await Promise.all(selectedEmployees.flatMap(employee =>
-        reviewRows.map(async (row, index) => {
-          const weekStart = new Date(firstMonday)
-          weekStart.setDate(firstMonday.getDate() + index * 7)
+        reviewWeeks.map(async week => {
           const response = await fetch('/api/performance/marks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               employeeId: String(employee.id || employee._id),
               projectId: 'all',
-              periodStart: getMonday(weekStart),
-              rating: Number(directorMarks[index]),
+              periodStart: week.periodStart,
+              rating: Number(directorMarks[week.periodStart]),
               comment: ''
             })
           })
@@ -148,35 +159,40 @@ const DirectorPerformanceReview: React.FC<DirectorPerformanceReviewProps> = ({
             </tr>
           </thead>
           <tbody>
-            {reviewRows.map((row, index) => {
-              const rowTasks = taskNames.slice(index * row.tasksDone, (index + 1) * row.tasksDone)
-              const employeeMarks = employeeId === 'all'
+            {reviewWeeks.map(week => {
+              const employeeRows = employeeId === 'all'
                 ? performanceData
                 : performanceData.filter(performance => String(performance.employeeId) === employeeId)
-              const selfMark = employeeId === 'all'
-                ? row.selfMark
-                : employeeMarks[0]?.weeklyMark?.selfRating ?? row.selfMark
-              const coordinatorMark = employeeId === 'all'
-                ? row.coordinatorMark
-                : employeeMarks[0]?.weeklyMark?.coordinatorRating ?? row.coordinatorMark
+              const history = employeeRows.flatMap(performance =>
+                (performance.weeklyHistory || []).filter(item => item.periodStart === week.periodStart)
+              )
+              const marks = employeeRows.flatMap(performance =>
+                (performance.weeklyMarks || []).filter(mark => mark.periodStart === week.periodStart)
+              )
+              const taskNames = Array.from(new Set(history.flatMap(item => item.taskTitles || [])))
+              const tasksDone = history.reduce((sum, item) => sum + item.tasksDone, 0)
+              const workHours = history.length > 0 ? history.reduce((sum, item) => sum + item.hoursLogged, 0) : undefined
+              const freeHours = history.length > 0 ? history.reduce((sum, item) => sum + item.freeHours, 0) : undefined
+              const directorMark = employeeId === 'all'
+                ? ''
+                : marks.find(mark => String(employeeRows[0]?.employeeId) === employeeId)?.rating
               return (
-                <tr key={row.week} className={index % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}>
-                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{row.week}</td>
+                <tr key={week.periodStart} className={reviewWeeks.indexOf(week) % 2 === 0 ? 'bg-[#F8FAFC]' : 'bg-white'}>
+                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{week.week}</td>
                   <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#DC2626]">
-                    <details className="relative">
-                      <summary className="w-fit cursor-pointer list-none font-medium">{row.tasksDone} <span aria-hidden="true">▾</span></summary>
+                    {taskNames.length > 0 ? <details className="relative">
+                      <summary className="w-fit cursor-pointer list-none font-medium">{tasksDone} <span aria-hidden="true">▾</span></summary>
                       <ul className="absolute left-0 top-6 z-10 min-w-48 rounded-md border border-[#E5E7EB] bg-white p-2 text-xs text-[#1F2937] shadow-lg">
-                        {(rowTasks.length ? rowTasks : taskNames).map((title, taskIndex) => (
+                        {taskNames.map((title, taskIndex) => (
                           <li key={`${title}-${taskIndex}`} className="py-1">{title}</li>
                         ))}
-                        {rowTasks.length === 0 && taskNames.length === 0 && <li className="py-1">No task names available</li>}
                       </ul>
-                    </details>
+                    </details> : '—'}
                   </td>
-                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{row.workHours}</td>
-                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{row.freeHours}</td>
-                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{selfMark}</td>
-                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{coordinatorMark}</td>
+                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{workHours ?? '—'}</td>
+                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{freeHours ?? '—'}</td>
+                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{formatAverage(marks.map(mark => mark.selfRating))}</td>
+                  <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#475569]">{formatAverage(marks.map(mark => mark.coordinatorRating))}</td>
                   <td className="border border-[#E5E7EB] px-2 py-2.5 text-[#DC2626]">
                     <label className="inline-flex items-center gap-1 font-bold">
                       <span>[</span>
@@ -184,11 +200,12 @@ const DirectorPerformanceReview: React.FC<DirectorPerformanceReviewProps> = ({
                         type="number"
                         min="1"
                         max="10"
-                        value={directorMarks[index]}
-                        onChange={event => setDirectorMarks(previous => previous.map((mark, markIndex) =>
-                          markIndex === index ? event.target.value : mark
-                        ))}
-                        aria-label={`Director mark for ${row.week}`}
+                        value={directorMarks[week.periodStart] ?? (directorMark === undefined ? '' : String(directorMark))}
+                        onChange={event => setDirectorMarks(previous => ({
+                          ...previous,
+                          [week.periodStart]: event.target.value
+                        }))}
+                        aria-label={`Director mark for ${week.week}`}
                         className="w-8 bg-transparent text-center font-bold text-[#DC2626] outline-none"
                       />
                       <span>]</span>
@@ -204,7 +221,12 @@ const DirectorPerformanceReview: React.FC<DirectorPerformanceReviewProps> = ({
       <button
         type="button"
         onClick={() => void submitMarks()}
-        disabled={isSaving || directorMarks.some(mark => !/^(10|[1-9])$/.test(mark))}
+        disabled={isSaving || reviewWeeks.some(week => !/^(10|[1-9])$/.test(
+          directorMarks[week.periodStart] ?? (employeeId === 'all' ? '' : String(
+            performanceData.find(performance => String(performance.employeeId) === employeeId)
+              ?.weeklyMarks?.find(mark => mark.periodStart === week.periodStart)?.rating ?? ''
+          ))
+        ))}
         className="h-[38px] w-full max-w-[272px] rounded-md bg-[#2563EB] px-4 text-sm font-bold text-white transition hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSaving ? 'Submitting...' : 'Submit Saturday Marks'}
