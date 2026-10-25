@@ -40,9 +40,7 @@ export async function GET(req: Request) {
 
     if (user.role === 'Project Head') {
       const allowedIds = user.assignedEmployees || []
-      const filter: any = allowedIds.length > 0
-        ? { $or: [{ _id: { $in: allowedIds } }, { _id: user._id }] }
-        : { role: { $in: ['Employee', 'Project Head'] } }
+      const filter = { $or: [{ _id: { $in: allowedIds } }, { _id: user._id }] }
       const employees = await Employee.find(filter).select('-passwordHash').sort({ firstName: 1 })
       return NextResponse.json(serialize(employees))
     }
